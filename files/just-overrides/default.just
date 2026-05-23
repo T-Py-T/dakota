@@ -214,7 +214,7 @@ report:
     cat <<SUMMARY
 ## Bluefin/Dakota Diagnostic Report
 Generated: ${TIMESTAMP}
-Anonymous device ID: ${HOST_ID}...
+Anonymous device ID: ${HOST_ID} (truncated)
 
 ### System
 - Kernel: ${KERNEL_VER}
