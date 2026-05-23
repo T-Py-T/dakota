@@ -9,6 +9,7 @@ bluefin-cli:
     brew bundle --file=/usr/share/ublue-os/homebrew/cli.Brewfile
 
 # alias for toggle-devmode
+[group('System')]
 devmode:
     @ujust toggle-devmode
 
@@ -103,9 +104,9 @@ rebase-helper:
 # Show current kernel parameters and explain how to add persistent ones
 [group('System')]
 kargs:
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
     echo "=== Current kernel parameters ==="
-    cat /proc/cmdline | tr ' ' '\n'
+    tr ' ' '\n' < /proc/cmdline
     echo ""
     echo "=== Adding persistent kernel parameters ==="
     echo "Dakota uses bootc with composefs — /usr is read-only so you cannot"
@@ -124,7 +125,7 @@ kargs:
 # Mount a drive persistently using a systemd.mount unit
 [group('System')]
 mount-drive:
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
     set -e
     echo "This creates a systemd .mount unit in /etc/systemd/system/"
     echo "which survives upgrades. GNOME Disks cannot write /etc/fstab on Dakota."
@@ -142,19 +143,19 @@ mount-drive:
     UNIT_NAME="$(systemd-escape --path --suffix=mount "$MOUNTPOINT")"
 
     sudo mkdir -p "$MOUNTPOINT"
-    sudo tee "/etc/systemd/system/${UNIT_NAME}" > /dev/null <<EOF
-    [Unit]
-    Description=Mount $DEVICE at $MOUNTPOINT
+    sudo tee "/etc/systemd/system/${UNIT_NAME}" > /dev/null <<-EOF
+	[Unit]
+	Description=Mount $DEVICE at $MOUNTPOINT
 
-    [Mount]
-    What=$DEVICE
-    Where=$MOUNTPOINT
-    Type=$FSTYPE
-    Options=defaults
+	[Mount]
+	What=$DEVICE
+	Where=$MOUNTPOINT
+	Type=$FSTYPE
+	Options=defaults
 
-    [Install]
-    WantedBy=multi-user.target
-    EOF
+	[Install]
+	WantedBy=multi-user.target
+	EOF
 
     sudo systemctl daemon-reload
     sudo systemctl enable --now "$UNIT_NAME"

@@ -3,4 +3,4 @@
 # ATTR{loop/backing_file} glob is intentionally omitted: fnmatch * does not
 # cross path separators, so /composefs/objects/* fails to match the real
 # two-level path /composefs/objects/<2-char>/<hash>.
-SUBSYSTEM=="block", KERNEL=="loop*", ENV{ID_FS_TYPE}=="erofs", ENV{UDISKS_IGNORE}="1"
+SUBSYSTEM=="block", ACTION=="add|change|move|bind", KERNEL=="loop*", ENV{ID_FS_TYPE}=="erofs", ENV{UDISKS_IGNORE}="1"
