@@ -68,7 +68,11 @@ build variant="all":
 
     if [ "{{variant}}" = "all" ]; then
         just build default
-        just build nvidia
+        if [ "${BUILD_SKIP_NVIDIA:-}" != "1" ]; then
+            just build nvidia
+        else
+            echo "==> Skipping nvidia variant (BUILD_SKIP_NVIDIA=1)"
+        fi
         exit 0
     fi
 
