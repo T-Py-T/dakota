@@ -170,9 +170,9 @@ report:
     FLATPAK_LIST=$(echo "$FLATPAK_LIST" | sed -E 's|/home/[^/[:space:]]+/|/home/<redacted>/|g')
     GNOME_EXTENSIONS=$(echo "$GNOME_EXTENSIONS" | sed -E 's|/home/[^/[:space:]]+/|/home/<redacted>/|g')
 
-    # ── OTel phase: collect deep system telemetry ────────────────────────────
+    # ── OTel phase: collect system information donation ────────────────────────────
 
-    echo "Collecting system telemetry (35 seconds)..."
+    echo "Collecting system information donation (35 seconds)..."
 
     OTEL_CONFIG="$(mktemp /tmp/ujust-report-otel-XXXXXX.yaml)"
     sed "s|/output/|${REPORT_DIR}/|g" \
@@ -202,7 +202,7 @@ report:
             2>/dev/null || true
     else
         echo "Warning: otelcol-contrib not found and podman unavailable."
-        echo "         Deep telemetry omitted from report."
+        echo "         System information donation omitted from report."
     fi
 
     # ── Build summary.md ─────────────────────────────────────────────────────
@@ -242,31 +242,51 @@ report:
     printf '\`\`\`\n'
     printf '%s\n' "${FLATPAK_LIST}"
     printf '\`\`\`\n'
-    printf '\n### Full Telemetry\n'
-    printf 'See report.otlp.json in this gist for structured OTel metrics and journal logs.\n'
+    printf '\n### Full System Information Donation\n'
+    printf 'See report.otlp.json in this gist for the full system information donation (structured metrics and journal logs).\n'
     } > "$REPORT_DIR/summary.md"
+
+    # ── Review ────────────────────────────────────────────────────────────────
+
+    echo ""
+    echo "📊 Review what will be donated before uploading:"
+    echo ""
+
+    # Render summary in a forced pager — user must scroll through and press q
+    if command -v glow &>/dev/null; then
+        glow "$REPORT_DIR/summary.md" | gum pager
+    else
+        gum pager < "$REPORT_DIR/summary.md"
+    fi
+
+    # Show file paths and sizes so user knows exactly what leaves their machine
+    echo ""
+    echo "📁 Files that will be uploaded to YOUR gist (you can delete them anytime):"
+    echo ""
+    ls -lh "$REPORT_DIR/"summary.md 2>/dev/null | awk '{print "   " $NF " (" $5 ") — human-readable summary"}'
+    if [[ -f "$REPORT_DIR/report.otlp.json" ]]; then
+        ls -lh "$REPORT_DIR/report.otlp.json" | awk '{print "   " $NF " (" $5 ") — structured system metrics + journal logs"}'
+    fi
+    echo ""
+    echo "   Inspect anytime: cat $REPORT_DIR/summary.md"
+    echo ""
 
     # ── Upload ────────────────────────────────────────────────────────────────
 
-    echo ""
-    echo "Report ready:"
-    echo "  $REPORT_DIR/summary.md"
-    [[ -f "$REPORT_DIR/report.otlp.json" ]] && echo "  $REPORT_DIR/report.otlp.json"
-    echo ""
-
-    if ! gum confirm "Upload diagnostic report to your GitHub gist?"; then
-        echo "Upload cancelled. Files saved to: $REPORT_DIR"
+    if ! gum confirm "Donate this system information report to your GitHub gist?"; then
+        echo "Donation cancelled. Files saved locally:"
+        echo "  $REPORT_DIR/"
         trap - EXIT
         exit 0
     fi
 
     if ! gh auth status --active &>/dev/null; then
         echo ""
-        echo "gh is not authenticated. Files saved locally:"
+        echo "gh is not authenticated. Your system information is saved locally:"
         echo "  $REPORT_DIR/"
         echo ""
-        echo "To upload manually:"
-        echo "  gh gist create --public --desc 'Bluefin diagnostic report' \\"
+        echo "To donate manually when ready:"
+        echo "  gh gist create --public --desc 'Bluefin system information donation' \\"
         echo "    $REPORT_DIR/summary.md $REPORT_DIR/report.otlp.json"
         trap - EXIT
         exit 0
@@ -276,11 +296,14 @@ report:
     [[ -f "$REPORT_DIR/report.otlp.json" ]] && GIST_FILES+=("$REPORT_DIR/report.otlp.json")
 
     GIST_URL=$(gh gist create --public \
-        --desc "Bluefin diagnostic report $(date -I)" \
+        --desc "Bluefin system information donation $(date -I)" \
         "${GIST_FILES[@]}")
 
     echo ""
-    echo "✅ Report uploaded: $GIST_URL"
+    echo "✅ Donated: $GIST_URL"
+    echo ""
+    echo "Your gist is in your own namespace — you can edit or delete it anytime:"
+    echo "  $GIST_URL"
     echo ""
     echo "To file an issue:"
     echo "  1. Open: https://github.com/projectbluefin/dakota/issues/new"
