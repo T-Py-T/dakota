@@ -253,10 +253,18 @@ report:
     echo ""
 
     # Render summary in a forced pager — user must scroll through and press q
-    if command -v glow &>/dev/null; then
-        glow "$REPORT_DIR/summary.md" | gum pager
+    if [[ -t 0 && -t 1 ]]; then
+        if command -v glow &>/dev/null; then
+            glow "$REPORT_DIR/summary.md" | gum pager
+        else
+            gum pager < "$REPORT_DIR/summary.md"
+        fi
     else
-        gum pager < "$REPORT_DIR/summary.md"
+        if command -v glow &>/dev/null; then
+            glow "$REPORT_DIR/summary.md"
+        else
+            cat "$REPORT_DIR/summary.md"
+        fi
     fi
 
     # Show file paths and sizes so user knows exactly what leaves their machine
