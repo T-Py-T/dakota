@@ -217,19 +217,19 @@ Generated: ${TIMESTAMP}
 Anonymous device ID: ${HOST_ID} (truncated)
 
 ### System
-- Kernel: ${KERNEL_VER}
-- Architecture: $(uname -m)
-- Load average (1/5/15 min): ${LOAD_AVG}
-- Memory: ${MEM_INFO}
+* Kernel: ${KERNEL_VER}
+* Architecture: $(uname -m)
+* Load average (1/5/15 min): ${LOAD_AVG}
+* Memory: ${MEM_INFO}
 
 ### Booted Image
-- Image: ${BOOTED_IMAGE}
-- Digest: ${BOOTED_DIGEST}
-- Staged: ${STAGED_IMAGE}
+* Image: ${BOOTED_IMAGE}
+* Digest: ${BOOTED_DIGEST}
+* Staged: ${STAGED_IMAGE}
 
 ### GNOME
-- Version: ${GNOME_VERSION}
-- Active extensions:
+* Version: ${GNOME_VERSION}
+* Active extensions:
 SUMMARY
     if [[ -n "$GNOME_EXTENSIONS" ]]; then
         echo "$GNOME_EXTENSIONS" | sed 's/^/  - /'
