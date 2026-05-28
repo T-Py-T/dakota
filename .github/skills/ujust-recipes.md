@@ -94,7 +94,7 @@ Fall back to `sed 's/ /%20/g; s/:/%3A/g; s|/|%2F|g'` for systems without Python.
 
 ---
 
-## Lore
+## Raptor spinner text
 
 Raptors travel in **kettles**, not packs. Use "kettle" in all raptor-related
 spinner messages and flavor text.
