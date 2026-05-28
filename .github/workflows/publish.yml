@@ -156,6 +156,11 @@ jobs:
           OCI_IMAGE_VERSION: latest
         run: just export ${{ matrix.variant }}
 
+      - name: Chunkify image layers
+        env:
+          BUILD_IMAGE_NAME: ${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
+        run: just chunkify "${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}:latest"
+
       - name: Validate with bootc container lint
         env:
           BUILD_IMAGE_NAME: ${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
