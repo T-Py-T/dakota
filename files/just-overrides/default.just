@@ -70,14 +70,14 @@ toggle-user-motd:
     if [ -e "${HOME}/.config/no-show-user-motd" ] ; then
       if gum confirm "Would you like to enable the MOTD?" ; then
         rm -f "${HOME}/.config/no-show-user-motd"
-        echo "MOTD will now be shown on login."
+        gum style --foreground 82 "✓ MOTD will now be shown on login."
         exit 0
       fi
     fi
     if gum confirm "Would you like to disable the MOTD?" ; then
       mkdir -p "${HOME}/.config"
       touch "${HOME}/.config/no-show-user-motd"
-      echo "MOTD will not be shown anynow"
+      gum style --foreground 245 "MOTD hidden. Run 'ujust toggle-user-motd' to bring it back."
       exit 0
     fi
 
@@ -154,6 +154,8 @@ report:
         --bold --foreground 212 \
         "🦖 Dakotaraptor Field Report"
     echo ""
+    gum style --foreground 245 --margin "0 2" \
+        "Help your kettle track down the tough bugs."
     gum style --foreground 245 --margin "0 2" \
         "Everything collected stays on your machine until you say so."
     gum style --foreground 245 --margin "0 2" \
