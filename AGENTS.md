@@ -4,6 +4,17 @@
 > contribute safely and test PRs in this repository. Human contributors can
 > follow the same steps.
 
+## Find something to work on
+
+| Time available | Link |
+|----------------|------|
+| 30 minutes | [XS issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fxs+no%3Aassignee) |
+| Half a day | [S issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fs+no%3Aassignee) |
+| Full day | [M issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fm+no%3Aassignee) |
+| All sizes | [Everything ready](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+no%3Aassignee+sort%3Acreated-asc) |
+
+Comment `/claim` on any issue to take it. Actionadon assigns it to you and removes it from the pool. If there's no PR activity after 7 days it returns automatically — no hard feelings.
+
 Dakota is a [BuildStream 2](https://buildstream.build/) project that produces
 **Bluefin** - a bootc OCI desktop image built entirely from source using
 freedesktop-sdk and gnome-build-meta as upstream foundations. No RPMs. No dnf.
