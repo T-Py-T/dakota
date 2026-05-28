@@ -170,13 +170,19 @@ report:
     FLATPAK_LIST=$(echo "$FLATPAK_LIST" | sed -E 's|/home/[^/[:space:]]+/|/home/<redacted>/|g')
     GNOME_EXTENSIONS=$(echo "$GNOME_EXTENSIONS" | sed -E 's|/home/[^/[:space:]]+/|/home/<redacted>/|g')
 
-    # ── OTel phase: collect system information donation ────────────────────────────
+    # ── OTel phase: collect system information donation (opt-in) ─────────────────
 
-    echo "Collecting system information donation (35 seconds)..."
+    SKIP_OTEL=1
+    if gum confirm "Collect detailed system metrics? (adds ~35s, useful for deep debugging)" --default=false; then
+        SKIP_OTEL=0
+    fi
 
-    OTEL_CONFIG="$(mktemp /tmp/ujust-report-otel-XXXXXX.yaml)"
-    sed "s|/output/|${REPORT_DIR}/|g" \
-        /usr/share/ublue-os/just/otel/ujust-report-config.yaml > "$OTEL_CONFIG"
+    if [[ "$SKIP_OTEL" -eq 0 ]]; then
+        echo "Collecting system information donation (35 seconds)..."
+
+        OTEL_CONFIG="$(mktemp /tmp/ujust-report-otel-XXXXXX.yaml)"
+        sed "s|/output/|${REPORT_DIR}/|g" \
+            /usr/share/ublue-os/just/otel/ujust-report-config.yaml > "$OTEL_CONFIG"
 
     OTELCOL_BINARY=""
     for candidate in \
@@ -206,6 +212,7 @@ report:
         echo "Warning: otelcol-contrib not found and podman unavailable."
         echo "         System information donation omitted from report."
     fi
+    fi  # end SKIP_OTEL
 
     # ── Build summary.md ─────────────────────────────────────────────────────
 
@@ -298,12 +305,26 @@ report:
 
     if ! gh auth status --active &>/dev/null; then
         echo ""
-        echo "gh is not authenticated. Your system information is saved locally:"
-        echo "  $REPORT_DIR/"
+        echo "gh is not authenticated — no problem! Here are your options:"
         echo ""
-        echo "To donate manually when ready:"
-        echo "  gh gist create --public --desc 'Bluefin system information donation' \\"
-        echo "    $REPORT_DIR/summary.md $REPORT_DIR/report.otlp.json"
+        echo "Option 1: Copy to clipboard and paste into a GitHub issue:"
+        if command -v wl-copy &>/dev/null; then
+            wl-copy < "$REPORT_DIR/summary.md"
+            echo "  ✅ Report copied to clipboard! Paste it into your issue."
+        elif command -v xclip &>/dev/null; then
+            xclip -selection clipboard < "$REPORT_DIR/summary.md"
+            echo "  ✅ Report copied to clipboard! Paste it into your issue."
+        else
+            echo "  (clipboard not available — see file below)"
+        fi
+        echo ""
+        echo "Option 2: Authenticate gh and upload as gist:"
+        echo "  gh auth login"
+        echo "  gh gist create --public --desc 'Bluefin diagnostic report' \\"
+        echo "    $REPORT_DIR/summary.md"
+        echo ""
+        echo "Your files are saved locally:"
+        echo "  $REPORT_DIR/"
         trap - EXIT
         exit 0
     fi
@@ -342,6 +363,189 @@ device-info:
     echo "    Running 'ujust report' now..."
     echo ""
     just report
+
+# Confirm you also experience an issue ("me too" with system context).
+# Usage: ujust confirm 531
+confirm issue_number:
+    #!/usr/bin/bash
+    set -euo pipefail
+
+    ISSUE="{{issue_number}}"
+    REPO="projectbluefin/dakota"
+
+    echo "📋 Confirming you also experience issue #${ISSUE}..."
+    echo ""
+
+    # Collect lightweight system fingerprint
+    BOOTC_JSON=$(sudo bootc status --json 2>/dev/null || echo '{}')
+    BOOTED_IMAGE=$(echo "$BOOTC_JSON" | jq -r '.status.booted.image.image.image // "unknown"')
+    BOOTED_DIGEST=$(echo "$BOOTC_JSON" | jq -r '.status.booted.imageDigest // "unknown"')
+    KERNEL_VER=$(uname -r)
+    ARCH=$(uname -m)
+    FAILED_UNITS=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null \
+                   | awk '{print $1}' | head -10 || echo "")
+
+    if [[ -r /etc/machine-id ]]; then
+        HOST_ID=$(printf 'ujust-confirm:%s' "$(cat /etc/machine-id)" | sha256sum | cut -c1-8)
+    else
+        HOST_ID="unknown"
+    fi
+
+    # Build the comment
+    COMMENT=$(printf '### ✋ I also experience this issue\n\n')
+    COMMENT+=$(printf '| Field | Value |\n|-------|-------|\n')
+    COMMENT+=$(printf '| Image | `%s` |\n' "$BOOTED_IMAGE")
+    COMMENT+=$(printf '| Digest | `%s` |\n' "$BOOTED_DIGEST")
+    COMMENT+=$(printf '| Kernel | `%s` |\n' "$KERNEL_VER")
+    COMMENT+=$(printf '| Arch | `%s` |\n' "$ARCH")
+    COMMENT+=$(printf '| Device ID | `%s` |\n' "$HOST_ID")
+    if [[ -n "$FAILED_UNITS" ]]; then
+        COMMENT+=$(printf '\n**Failed units:** ')
+        COMMENT+=$(echo "$FAILED_UNITS" | tr '\n' ',' | sed 's/,$//')
+        COMMENT+=$(printf '\n')
+    fi
+    COMMENT+=$(printf '\n_Submitted via `ujust confirm %s`_\n' "$ISSUE")
+
+    # Show user what will be posted
+    echo "$COMMENT"
+    echo ""
+
+    if ! gum confirm "Post this as a comment on issue #${ISSUE}?"; then
+        echo "Cancelled."
+        exit 0
+    fi
+
+    if gh auth status --active &>/dev/null; then
+        gh issue comment "$ISSUE" --repo "$REPO" --body "$COMMENT"
+        echo ""
+        echo "✅ Confirmation posted on issue #${ISSUE}"
+    else
+        echo ""
+        if command -v wl-copy &>/dev/null; then
+            printf '%s' "$COMMENT" | wl-copy
+            echo "📋 Copied to clipboard! Paste it as a comment on:"
+        else
+            echo "📋 Copy the text above and paste it as a comment on:"
+        fi
+        echo "  https://github.com/${REPO}/issues/${ISSUE}"
+        echo ""
+        echo "Or authenticate gh first: gh auth login"
+    fi
+
+# Verify that a fix works on your hardware after upgrading.
+# Usage: ujust verify 531
+verify issue_number:
+    #!/usr/bin/bash
+    set -euo pipefail
+
+    ISSUE="{{issue_number}}"
+    REPO="projectbluefin/dakota"
+
+    echo "🔍 Verifying fix for issue #${ISSUE}..."
+    echo ""
+
+    # Fetch issue context if gh is available
+    ISSUE_TITLE=""
+    VERIFY_STEPS=""
+    if gh auth status --active &>/dev/null; then
+        ISSUE_TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title --jq '.title' 2>/dev/null || echo "")
+        ISSUE_BODY=$(gh issue view "$ISSUE" --repo "$REPO" --json body --jq '.body' 2>/dev/null || echo "")
+        # Extract verify-steps block (between ```verify and ```)
+        VERIFY_STEPS=$(echo "$ISSUE_BODY" | sed -n '/^```verify/,/^```/p' | sed '1d;$d' || echo "")
+    fi
+
+    if [[ -n "$ISSUE_TITLE" ]]; then
+        echo "Issue: #${ISSUE} — ${ISSUE_TITLE}"
+        echo ""
+    fi
+
+    if [[ -n "$VERIFY_STEPS" ]]; then
+        echo "── Verification steps from maintainer ──"
+        echo "$VERIFY_STEPS"
+        echo "─────────────────────────────────────────"
+        echo ""
+        echo "Please check the steps above on your system."
+        echo ""
+    else
+        echo "No specific verify-steps found in the issue."
+        echo "Check whether the bug you experienced is still present after upgrading."
+        echo ""
+    fi
+
+    # Ask user for their verdict
+    VERDICT=$(gum choose "✅ Fixed — bug is gone" "❌ Still broken" "⚠️ Different behavior" "ℹ️ Cannot confirm (did not have the bug)")
+
+    case "$VERDICT" in
+        *Fixed*) RESULT="fixed" ; EMOJI="✅" ;;
+        *broken*) RESULT="still-broken" ; EMOJI="❌" ;;
+        *Different*) RESULT="different" ; EMOJI="⚠️" ;;
+        *) RESULT="cannot-confirm" ; EMOJI="ℹ️" ;;
+    esac
+
+    # Collect system context
+    BOOTC_JSON=$(sudo bootc status --json 2>/dev/null || echo '{}')
+    BOOTED_IMAGE=$(echo "$BOOTC_JSON" | jq -r '.status.booted.image.image.image // "unknown"')
+    BOOTED_DIGEST=$(echo "$BOOTC_JSON" | jq -r '.status.booted.imageDigest // "unknown"')
+    KERNEL_VER=$(uname -r)
+    ARCH=$(uname -m)
+
+    if [[ -r /etc/machine-id ]]; then
+        HOST_ID=$(printf 'ujust-verify:%s' "$(cat /etc/machine-id)" | sha256sum | cut -c1-8)
+    else
+        HOST_ID="unknown"
+    fi
+
+    # Optional: collect relevant journal if user wants
+    JOURNAL_SNIPPET=""
+    if [[ "$RESULT" == "still-broken" || "$RESULT" == "different" ]]; then
+        if gum confirm "Include recent journal logs for debugging? (last 50 lines of relevant services)" --default=false; then
+            JOURNAL_SNIPPET=$(journalctl --no-pager -b -n 50 --priority=err..emerg 2>/dev/null \
+                | sed -E 's|/home/[^/[:space:]]+/|/home/<redacted>/|g' \
+                | sed -E 's/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<ip>/g' || echo "")
+        fi
+    fi
+
+    # Build the verification comment
+    COMMENT=$(printf '### %s Verification: **%s**\n\n' "$EMOJI" "$RESULT")
+    COMMENT+=$(printf '| Field | Value |\n|-------|-------|\n')
+    COMMENT+=$(printf '| Image | `%s` |\n' "$BOOTED_IMAGE")
+    COMMENT+=$(printf '| Digest | `%s` |\n' "$BOOTED_DIGEST")
+    COMMENT+=$(printf '| Kernel | `%s` |\n' "$KERNEL_VER")
+    COMMENT+=$(printf '| Arch | `%s` |\n' "$ARCH")
+    COMMENT+=$(printf '| Device ID | `%s` |\n' "$HOST_ID")
+    if [[ -n "$JOURNAL_SNIPPET" ]]; then
+        COMMENT+=$(printf '\n<details><summary>Journal (errors, last 50 lines)</summary>\n\n```\n%s\n```\n</details>\n' "$JOURNAL_SNIPPET")
+    fi
+    COMMENT+=$(printf '\n_Submitted via `ujust verify %s`_\n' "$ISSUE")
+
+    # Show user what will be posted
+    echo ""
+    echo "$COMMENT"
+    echo ""
+
+    if ! gum confirm "Post this verification on issue #${ISSUE}?"; then
+        echo "Cancelled. You can paste the text above manually."
+        exit 0
+    fi
+
+    if gh auth status --active &>/dev/null; then
+        gh issue comment "$ISSUE" --repo "$REPO" --body "$COMMENT"
+        echo ""
+        echo "✅ Verification posted on issue #${ISSUE}"
+        echo ""
+        echo "Thank you for helping confirm whether this fix works!"
+    else
+        echo ""
+        if command -v wl-copy &>/dev/null; then
+            printf '%s' "$COMMENT" | wl-copy
+            echo "📋 Copied to clipboard! Paste it as a comment on:"
+        else
+            echo "📋 Copy the text above and paste it as a comment on:"
+        fi
+        echo "  https://github.com/${REPO}/issues/${ISSUE}"
+        echo ""
+        echo "Or authenticate gh first: gh auth login"
+    fi
 
 # Measure Idle Power Draw
 check-idle-power-draw:
