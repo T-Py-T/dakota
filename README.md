@@ -36,6 +36,8 @@ Each Dakota installation is designed to run as a hardware diagnostic lab for its
 
 ## The research behind it
 
+Dakota is human driven with contribution workflows for agents, so if you have tokens to donate, ask it to review issues or PRs, it's useful! The humans make the final decisions. We coordinate this project via a tool called [Hive](https://github.com/kubestellar/hive) from Kubestellar, a CNCF Sandbox project. 
+
 Dakota's feedback loop model is grounded in Andy Anderson's work on autonomous AI-assisted software development. The core finding: the intelligence of a system like this lives not in any single model, but in the infrastructure of instructions, tests, metrics, and feedback loops surrounding it.
 
 - [The AI Codebase Maturity Model](https://arxiv.org/abs/2604.09388) — the arxiv paper
