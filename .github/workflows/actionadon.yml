@@ -105,6 +105,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ▶  queued     open for contributors\n  ·  claimed    —\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  comment /claim to take this\n```\n\n---\n\n' "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -125,6 +126,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ▶  filed      report received\n  ·  approved   —\n  ·  queued     —\n  ·  claimed    —\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  same bug? ujust confirm %s\n```\n\n---\n\n' "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY" "$ISSUE_NUMBER")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -149,6 +151,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ▶  queued     open for contributors\n  ·  claimed    —\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  comment /claim to take this\n```\n\n---\n\n' "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -168,6 +171,7 @@ jobs:
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
           ASSIGNEE=$(printf '%s' "$DATA" | jq -r '.assignees[0].login // "—"')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ✓  queued     —\n  ▶  claimed    @%s\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  /unclaim to return to queue if stuck\n```\n\n---\n\n' "$ASSIGNEE" "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -189,6 +193,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           VERIFIED=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust verify";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ✓  queued     —\n  ✓  claimed    —\n  ▶  done       fix shipped\n─────────────────────────────────────────────────\n  report:       %-10s  ·  verified: %s/3\n  area:         %-10s  ·  priority: %s\n  next action:  ujust verify %s — three verifies closes the case\n```\n\n---\n\n' "$REPORT" "$VERIFIED" "$AREA" "$PRIORITY" "$ISSUE_NUMBER")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -243,6 +248,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ✓  queued     —\n  ▶  claimed    @%s\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  /unclaim to return to queue if stuck\n```\n\n---\n\n' "$COMMENTER" "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -270,6 +276,7 @@ jobs:
           PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
           REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
           CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+          # shellcheck disable=SC2016
           WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ▶  queued     open for contributors\n  ·  claimed    —\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  comment /claim to take this\n```\n\n---\n\n' "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
           printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
           gh issue edit "$ISSUE_URL" --body-file /tmp/new-body.md
@@ -318,6 +325,7 @@ jobs:
               PRIORITY=$(printf '%s' "$DATA" | jq -r '[.labels[].name | select(startswith("priority/")) | ltrimstr("priority/")] | first // "—"')
               REPORT="missing"; printf '%s\n' "$CLEAN" | grep -q 'gist.github.com' && REPORT="attached"
               CONFIRMS=$(printf '%s' "$DATA" | jq -r '[.comments[].body | select(. != null) | select(test("ujust confirm";"i"))] | length')
+              # shellcheck disable=SC2016
               WIDGET=$(printf '<!-- actionadon-pipeline -->\n```\nDAKOTA  ·  issue pipeline\n─────────────────────────────────────────────────\n  ✓  filed      report received\n  ✓  approved   cleared for the build queue\n  ▶  queued     open for contributors\n  ·  claimed    —\n  ·  done       —\n─────────────────────────────────────────────────\n  report:       %-10s  ·  confirms: %s\n  area:         %-10s  ·  priority: %s\n  next action:  comment /claim to take this\n```\n\n---\n\n' "$REPORT" "$CONFIRMS" "$AREA" "$PRIORITY")
               printf '%s%s' "$WIDGET" "$CLEAN" > /tmp/new-body.md
               gh issue edit "$NUMBER" --repo "$REPO" --body-file /tmp/new-body.md
