@@ -23,42 +23,7 @@ dakota  (main→:latest)       ←── images ──→ testsuite (e2e gate)
 Each image repo pulls `ghcr.io/projectbluefin/common:latest` as a base layer.
 testsuite gates `:latest` promotion in all three image repos.
 
----
-
-
-## Org pipeline — projectbluefin
-
-### Repo map
-
-```
-common ──────────────────────────┐
-(shared OCI layer)               │
-                                 ▼
-bluefin  (main→stable)       ←── images ──→ testsuite (e2e gate)
-bluefin-lts (main→lts)       ←── images ──→ testsuite (e2e gate)
-dakota  (main→:latest)       ←── images ──→ testsuite (e2e gate)
-                                 │
-                                 ▼
-                                iso (installation media)
-```
-
-**Dakota's role:** builds Bluefin entirely from source using BuildStream 2 (freedesktop-sdk + gnome-build-meta). No RPMs. The full pipeline: PR → validate + e2e → merge queue → `:sha` → e2e gate → `:latest`.
-testsuite gates `:latest` promotion — `:latest` is never published without a passing e2e smoke test.
-
-## Find something to work on
-
-| Time available | Link |
-|---|---|
-| 30 min | [XS issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fxs+no%3Aassignee) |
-| Half day | [S issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fs+no%3Aassignee) |
-| Full day | [M issues](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+label%3Asize%2Fm+no%3Aassignee) |
-| All | [Everything ready](https://github.com/projectbluefin/dakota/issues?q=is%3Aopen+label%3Aqueue%2Fagent-ready+no%3Aassignee+sort%3Acreated-asc) |
-
-Comment `/claim` on an issue to take it. Actionadon assigns it and removes it from the pool. No PR activity in 7 days returns it automatically.
-
----
-
-## Data donation
+---## Data donation
 
 Dakota bugs are data donations. `ujust report` captures full system state to a user-owned gist before the issue opens. That report is the ground truth.
 
