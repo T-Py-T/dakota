@@ -4,6 +4,27 @@ Dakota is a [BuildStream 2](https://buildstream.build/) project producing **Blue
 
 Load **[docs/SKILL.md](docs/SKILL.md)** for the full reference skill tree. Only load docs relevant to your task.
 
+## Org pipeline — projectbluefin
+
+### Repo map
+
+```
+common ──────────────────────────┐
+(shared OCI layer)               │
+                                 ▼
+bluefin  (main→stable)       ←── images ──→ testsuite (e2e gate)
+bluefin-lts (main→lts)       ←── images ──→ testsuite (e2e gate)
+dakota  (main→:latest)       ←── images ──→ testsuite (e2e gate)
+                                 │
+                                 ▼
+                                iso (installation media)
+```
+
+Each image repo pulls `ghcr.io/projectbluefin/common:latest` as a base layer.
+testsuite gates `:latest` promotion in all three image repos.
+
+---
+
 ## Find something to work on
 
 | Time available | Link |
