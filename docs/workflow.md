@@ -165,30 +165,28 @@ Dakota publishes three streams from the `main` branch:
 ```
 main (source of truth)
   │
-  └─► build.yml (nightly + merge_group)
+  └─► build.yml (nightly + merge_group + workflow_dispatch)
           │
-          └─► publish.yml (workflow_run)
+          └─► publish.yml (workflow_run on build success)
                   │
                   ├─► :sha     — immutable per-build tag
                   └─► :testing — promoted after e2e smoke passes
                                        │
                               weekly-testing-promotion.yml
-                              (Tuesday 06:00 UTC, 2 human approvals)
+                              (Sunday 06:00 UTC, production environment approval)
                                        │
-                                       ├─► :latest
-                                       └─► :stable
+                                       ├─► :latest  (+ fast-forwards latest branch)
+                                       └─► :stable  (+ fast-forwards stable branch)
 ```
 
 | Stream | Tag | Cadence | Gate |
 |---|---|---|---|
 | Development | `:sha` | Every merge to `main` | None |
 | Testing | `:testing` | Nightly | e2e smoke |
-| Latest | `:latest` | Weekly | e2e full suite + 2 human approvals |
-| Stable | `:stable` | Weekly | Same as `:latest` |
+| Latest | `:latest` | Weekly (Sunday) | production environment approval |
+| Stable | `:stable` | Weekly (Sunday) | Same as `:latest` |
 
-**`main` IS the testing branch.** There is no separate `testing` branch for
-code. Content merges to `main`; CI builds from `main`; `:testing` is the
-published nightly result.
+**All code merges to `main`.** The `:testing` Docker tag is the published nightly result built from `main`. The `testing`, `latest`, and `stable` git branches are bookmarks fast-forwarded by the promotion workflows — they are not development branches.
 
 **Branch protection is only on `main`.** Required status checks: `validate` + `e2e`.
 

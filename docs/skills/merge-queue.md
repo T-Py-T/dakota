@@ -2,7 +2,7 @@
 
 ## When to Load
 
-Load when clearing stuck dependency-update PRs, rebasing chore branches against `testing`, or finishing a batch of bot PR merges.
+Load when clearing stuck dependency-update PRs, rebasing chore branches against `main`, or finishing a batch of bot PR merges.
 
 ## When NOT to Use
 
@@ -14,11 +14,11 @@ Load when clearing stuck dependency-update PRs, rebasing chore branches against 
 
 Look for these signals:
 
-- chore/dependency PR is open against `main` instead of `testing`
-- merge box shows `CONFLICTING` after other chore PRs landed in `testing`
+- chore/dependency PR is open against the wrong base
+- merge box shows `CONFLICTING` after other PRs landed in `main`
 - `gh pr merge --auto` fails with `Protected branch rules not configured for this branch`
 - e2e is stale and the branch cannot be rerun by pushing
-- PR is technically open but has no diff after rebasing onto `testing`
+- PR is technically open but has no diff after rebasing onto `main`
 
 Useful checks:
 
@@ -27,54 +27,29 @@ gh pr list --repo projectbluefin/dakota --search 'is:open is:pr'
 gh pr view <N> --repo projectbluefin/dakota --json baseRefName,headRefName,mergeStateStatus,isCrossRepository
 ```
 
-## Retarget Chore PRs to `testing`
-
-Bot PRs from mergeraptor and renovate are created against `main` by default. Dependency-update chores must land in `testing` first.
-
-1. Retarget the PR:
-
-```bash
-gh pr edit <N> --base testing --repo projectbluefin/dakota
-```
-
-2. Fetch the branch and rebase it onto `upstream/testing`:
-
-```bash
-git fetch upstream <branch> testing
-git checkout -B fix-<branch> upstream/<branch>
-git rebase upstream/testing
-git push upstream HEAD:<branch> --force-with-lease
-```
-
-3. Re-check mergeability:
-
-```bash
-gh pr view <N> --repo projectbluefin/dakota --json mergeStateStatus
-```
-
 ## Rebase Conflicting PRs
 
-Sequential merges into `testing` advance the target branch every time. A branch that was clean before PR #1 can become stale after PRs #2 through #6 land.
+All PRs — chore, dep-update, feature — target `main`. Sequential merges advance `main`, making earlier branches stale.
 
 Use this loop:
 
 1. Merge the ready PRs.
-2. Re-list the remaining open chore PRs.
+2. Re-list the remaining open PRs.
 3. Rebase any PRs still showing `CONFLICTING` or stale checks.
 4. Do a final pass after the batch — expect at least one more rebase round.
 
 Standard rebase sequence:
 
 ```bash
-git fetch upstream <branch> testing
+git fetch upstream <branch> main
 git checkout -B fix-<branch> upstream/<branch>
-git rebase upstream/testing
+git rebase upstream/main
 git push upstream HEAD:<branch> --force-with-lease
 ```
 
 ## Merge Chore PRs
 
-`testing` does not have auto-merge configured in branch protection.
+`main` does not have auto-merge configured in branch protection.
 
 Do **not** use:
 
@@ -90,9 +65,9 @@ gh pr merge <N> --repo projectbluefin/dakota --squash
 
 ## Known `AGENTS.md` Rebase Conflict
 
-When rebasing from `main` onto `testing`, `AGENTS.md` often conflicts because `testing` already contains the text being replayed.
+When rebasing branches that predate recent `main` changes, `AGENTS.md` may conflict if both sides modified it.
 
-Resolve by keeping the `testing` version (`HEAD`) and removing conflict markers:
+Resolve by keeping the incoming version and removing conflict markers:
 
 ```bash
 sed -i '/<<<<<<< HEAD/d; />>>>>>> .*/d; /^=======$/d' AGENTS.md
@@ -100,17 +75,15 @@ git add AGENTS.md
 GIT_EDITOR=true git rebase --continue
 ```
 
-If the only conflict is duplicated text already present on `testing`, do not try to manually merge both sides.
-
 ## Empty PR Detection
 
-After rebasing onto `testing`, verify the branch still has a diff:
+After rebasing onto `main`, verify the branch still has a diff:
 
 ```bash
-gh api repos/projectbluefin/dakota/compare/testing...<branch> --jq '{ahead: .ahead_by, behind: .behind_by}'
+gh api repos/projectbluefin/dakota/compare/main...<branch> --jq '{ahead: .ahead_by, behind: .behind_by}'
 ```
 
-If `ahead` is `0`, the target branch already contains the change. Close the PR with a short note explaining that rebasing showed no remaining diff.
+If `ahead` is `0`, `main` already contains the change. Close the PR with a short note.
 
 ## Retriggering e2e
 
@@ -138,10 +111,9 @@ Options:
 
 ## Feature PRs vs Chore PRs — Different Targets
 
-- **Chore / dep-update PRs** → target `testing`. Rebase onto `upstream/testing`.
-- **Feature / fix PRs** → target `main`. Rebase onto `upstream/main`.
+## All PRs target `main`
 
-Retargeting a feature PR to `testing` is wrong. Check `baseRefName` before rebasing:
+All PRs — feature, fix, chore, dep-update — target `main`. Check `baseRefName` before rebasing:
 
 ```bash
 gh pr view <N> --repo projectbluefin/dakota --json baseRefName,isCrossRepository \
@@ -162,7 +134,7 @@ gh pr view <N> --repo projectbluefin/dakota --json maintainerCanModify,headRepos
 git remote add <contributor> git@github.com:<headRepositoryOwner>/dakota.git
 git fetch <contributor> <headRefName>
 git checkout -B fix-<N> <contributor>/<headRefName>
-git rebase upstream/main      # or upstream/testing for chores
+git rebase upstream/main
 git push <contributor> HEAD:<headRefName> --force-with-lease
 ```
 
@@ -170,14 +142,14 @@ If `maintainerCanModify: false`, do not push. Request the contributor rebase ins
 
 ## Fleet Parallel Dispatch Pattern
 
-When multiple chore PRs are all stuck against `testing`, dispatch rebases in parallel, usually in pairs.
+When multiple PRs are all stuck against `main`, dispatch rebases in parallel, usually in pairs.
 
 Each agent should own one branch and run exactly this sequence:
 
 1. Check `isCrossRepository` — use the fork push path if true (see above)
 2. `git fetch upstream <branch>` (or `git fetch <fork> <branch>` for cross-repo)
 3. `git checkout -B fix-<branch> upstream/<branch>`
-4. `git rebase upstream/testing`
+4. `git rebase upstream/main`
 5. `git push upstream HEAD:<branch> --force-with-lease` (or push to fork for cross-repo)
 
 Why pairs: it speeds up queue recovery without turning every branch into a moving target at once. After the first wave lands, run one more cleanup pass for any PRs that became stale during the earlier merges.

@@ -4,9 +4,9 @@
 
 | Job | Triggers | What |
 |---|---|---|
-| `validate` | `pull_request` | `bst show` — graph + patch check (~5 min) |
-| `e2e` | `pull_request` (path-filtered) | Smoke test in QEMU via projectbluefin/testsuite |
-| `build` | `merge_group`, `schedule`, `workflow_dispatch` | Full OCI build (~60–90 min) |
+| `validate` | `pull_request` | `bst show` — graph + patch check (~15 min) |
+| `e2e` | `pull_request` when `elements/`, `files/`, `patches/`, `Justfile`, or `project.conf` changed | Smoke test in QEMU via projectbluefin/testsuite |
+| `build` | `merge_group`, `schedule`, `workflow_dispatch` (skips on `pull_request`) | Full OCI build (~60–90 min) |
 | `build-aarch64` | disabled | ARM64 — pending investigation |
 
 ## Publish pipeline (publish.yml)
@@ -27,6 +27,8 @@ build.yml (main) → [workflow_run] → publish.yml
 
 `:testing` is never published without a passing e2e smoke test.
 
+After every successful publish, `release.yml` auto-fires (via `workflow_run`) and creates a GitHub Release with a card image, SBOM diff, and package changelog.
+
 **Critical ordering:** `publish.yml` pulls the OCI artifact from CAS. The artifact
 is only in CAS if `build.yml` ran on `main` first. If `build.yml` has only run on
 feature branches, CAS will not have the artifact for main's SHA and publish will
@@ -35,7 +37,7 @@ manually dispatching `publish.yml`.
 
 ## Weekly promotion (weekly-testing-promotion.yml)
 
-Runs Tuesday 06:00 UTC. Promotes `:testing` → `:latest` + `:stable` via digest-pinned re-tagging.
+Runs **Sunday 06:00 UTC**. Promotes `:testing` → `:latest` + `:stable` via digest-pinned re-tagging, then fast-forwards the `latest` and `stable` git branches to the promoted source SHA.
 
 ```
 resolve → check-diff → promote → update-branches
@@ -45,8 +47,8 @@ resolve → check-diff → promote → update-branches
 |---|---|
 | `resolve` | Pins `:testing` digest, verifies default + NVIDIA share same source SHA |
 | `check-diff` | Skips if `:testing` == `:latest` (nothing new to promote) |
-| `promote` | Re-tags both variants as `:latest` + `:stable` |
-| `update-branches` | Fast-forwards `latest` and `stable` branches to promoted SHA |
+| `promote` | Re-tags both variants as `:latest` + `:stable` (requires `production` environment approval) |
+| `update-branches` | Fast-forwards `latest` and `stable` branches to promoted source SHA |
 
 ## Schedule
 
@@ -75,15 +77,17 @@ To manually cut a `:stable` and `:latest` release:
 
 ```bash
 # 1. Ensure :testing exists and is healthy
-gh run list --repo projectbluefin/dakota --workflow publish.yml --limit 5
+gh run list --repo projectbluefin/dakota --workflow "Publish Bluefin dakota" --limit 5
 
 # 2. Dispatch the weekly promotion workflow
 gh workflow run weekly-testing-promotion.yml \
   --repo projectbluefin/dakota
 
-# 3. Two human approvals required via production environment gate
+# 3. Approve the deployment at the production environment gate
 # Approval URL: https://github.com/projectbluefin/dakota/deployments
 ```
+
+The `promote` job requires approval via the `production` GitHub Environment before it runs. The number of required approvals is configured in the environment settings.
 
 ## Restarting the factory (publish pipeline has been idle)
 
@@ -122,12 +126,12 @@ Valid `GITHUB_TOKEN` permission scopes: `actions`, `attestations`, `checks`,
 `packages`, `pages`, `pull-requests`, `repository-projects`, `security-events`,
 `statuses`. Any unknown scope causes `startup_failure`.
 
-## e2e path filter
+## e2e change detection
 
-e2e only fires when these paths change:
+e2e uses a `should-run` job that diffs `HEAD` against the PR base branch. It fires when any of these paths change:
 
 ```
 elements/**  files/**  patches/**  Justfile  project.conf
 ```
 
-PRs touching only `.github/workflows/` (action pins, bst2 bumps) skip e2e — the check is marked skipped, which satisfies the required status check. Junction bumps in `elements/` always run e2e.
+There is no `paths:` filter on the `on.pull_request` trigger — the workflow always starts, but the `e2e` job is skipped when `should-run` finds no relevant changes. This means e2e is marked **skipped** (not failed) for action pin bumps and workflow-only changes, which satisfies the required status check.

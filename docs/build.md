@@ -47,10 +47,10 @@ First run is slow (cold BST cache). Subsequent runs are fast — BST caches by c
 ## Useful BST commands
 
 ```bash
-just validate                                           # check element graph
-just bst build elements/bluefin/tailscale.bst          # build one element
-just bst shell --build elements/bluefin/tailscale.bst  # sandbox shell
-just bst show --deps all oci/bluefin.bst               # full dependency graph
+just validate                                        # check element graph
+just bst build bluefin/tailscale.bst                 # build one element
+just bst shell --build bluefin/tailscale.bst         # sandbox shell
+just bst show --deps all oci/bluefin.bst             # full dependency graph
 ```
 
 ## What NOT to do

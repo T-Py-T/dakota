@@ -30,21 +30,22 @@ Load when debugging CI failures, understanding the build pipeline, or working wi
 |---|---|
 | `.github/workflows/build.yml` | BST build + push artifacts to remote CAS. Fires on merge_group/schedule/dispatch. Does NOT push to GHCR directly. |
 | `.github/workflows/publish.yml` | 4-stage pipeline: setup → publish → e2e-gate → promote. Pulls artifact from CAS, exports OCI, pushes `:$sha`, signs, attests, smoke-tests, then promotes to `:testing`. |
-| `.github/workflows/weekly-testing-promotion.yml` | Weekly promotion (Tue 06:00 UTC): verifies `:testing` digests, re-tags as `:latest` + `:stable`, fast-forwards branches. |
-| `.github/workflows/e2e.yml` | Smoke test via projectbluefin/testsuite. Fires on PR when image-affecting paths change. |
+| `.github/workflows/release.yml` | Auto-fires after every successful publish. Creates GitHub Release with card image, SBOM diff, and package changelog. |
+| `.github/workflows/weekly-testing-promotion.yml` | Weekly promotion (Sun 06:00 UTC): verifies `:testing` digests, re-tags as `:latest` + `:stable`, fast-forwards `latest`/`stable` branches. |
+| `.github/workflows/e2e.yml` | Smoke test via projectbluefin/testsuite. Fires on PR; `should-run` job skips the test when no image-affecting paths changed. |
 
 ## Trigger Behavior
 
 | Behavior | pull_request | merge_group | schedule | workflow_dispatch |
 |---|---|---|---|---|
 | `validate` job | Yes | No | No | No |
-| `e2e` job | Yes (path-filtered) | No | No | No |
+| `e2e` job | Yes (change-detected) | No | No | Yes |
 | `build` job | No | Yes | Yes | Yes |
 | Push to GHCR? | No | Via publish.yml | Via publish.yml | Via publish.yml |
 
-**PR path:** `validate` + `e2e` (path-filtered) — zero remote execution. ~15 min cached, ~30 min cold.
+**PR path:** `validate` + `e2e` (change-detected) — zero remote execution. ~15 min cached, ~30 min cold.
 
-**e2e path filter:** `e2e` fires only when `elements/`, `files/`, `patches/`, `Justfile`, or `project.conf` change. Skipped otherwise — skipped counts as passing for the required status check.
+**e2e change detection:** `e2e` uses a `should-run` job that diffs the PR branch against its base. It runs when `elements/`, `files/`, `patches/`, `Justfile`, or `project.conf` change; otherwise the `e2e` job is skipped. Skipped satisfies the required status check.
 
 **Merge queue path:** `build` fires on `merge_group` — full OCI build, real CI gate before merge.
 
@@ -150,7 +151,7 @@ Ruleset: `main-review-required-with-renovate-bypass`
 | Merge queue | ALLGREEN, max_entries_to_build=1, check_response_timeout=120 min |
 | Bypass actors | OrganizationAdmin, Renovate, mergeraptor |
 
-**e2e path filter:** `e2e` only fires for PRs touching `elements/`, `files/`, `patches/`, `Justfile`, or `project.conf`. For all other paths (e.g. workflow pin bumps) it is skipped, which satisfies the required check. Junction bumps in `elements/` always run e2e.
+**e2e change detection:** `e2e` only tests PRs touching `elements/`, `files/`, `patches/`, `Justfile`, or `project.conf`. For all other paths (e.g. workflow pin bumps) the `e2e` job is skipped, which satisfies the required check. The `should-run` job uses `git diff` against the PR base — no `paths:` filter on the trigger.
 
 **Critical:** Required status checks must only include checks that fire on `pull_request`. A check that only fires on `merge_group` will permanently block the "Add to merge queue" button.
 
@@ -287,7 +288,7 @@ gh api repos/projectbluefin/dakota/actions/workflows \
 # 3. Dispatch publish.yml to build :testing from current main
 gh workflow run publish.yml --repo projectbluefin/dakota
 
-# 4. Once publish completes, dispatch promotion (pauses for 2 human approvals)
+# 4. Once publish completes, dispatch promotion (pauses for production environment approval)
 gh workflow run weekly-testing-promotion.yml --repo projectbluefin/dakota
 ```
 
