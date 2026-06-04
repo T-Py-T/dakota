@@ -11,6 +11,7 @@ every future agent and contributor — not just you, and not just on one machine
 
 | Task | Load |
 |------|------|
+| **Load the dakota build context first** | **⚠️ REQUIRED FIRST — [`not-bluefin.md`](not-bluefin.md) before any other skill, especially if you have bluefin context** |
 | Zero-context routine maintenance | [`quickstart.md`](quickstart.md) |
 | Adding a package | [`add-package.md`](add-package.md) |
 | Removing a package | [`remove-package.md`](remove-package.md) |
