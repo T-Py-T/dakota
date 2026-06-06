@@ -89,6 +89,12 @@ Non-compliance = automatic rejection.
 
 **Production promotion** (`weekly-testing-promotion.yml`) requires 2 distinct human approvals in the GitHub `production` Environment. No agent may trigger, approve, or bypass this gate. Admin bypasses are permanently logged in Environment deployment history.
 
+**Promotion pipeline — cosign verify pattern:** When adding cosign verification to a promotion workflow, anchor the `--certificate-identity-regexp` with `^...$` and restrict it to the specific publishing workflow file and allowed ref patterns (e.g. `^https://github.com/<repo>/.github/workflows/publish\.yml@refs/heads/(main|gh-readonly-queue/main/.+)$`). An unanchored wildcard accepts signatures from any workflow in the repo.
+
+**cosign install on GHA runners:** Never write directly to `/usr/local/bin` without `sudo`. Use `curl -fsSL ... -o "$RUNNER_TEMP/cosign"` then `sudo install -m 0755 "$RUNNER_TEMP/cosign" /usr/local/bin/cosign`. The runner user cannot write to `/usr/local/bin` on GitHub-hosted runners.
+
+**TOCTOU guard in promotion workflows:** The `lock-sha` step must lock the *tested* source SHA (from the `verify` step output), not the live `main` HEAD. Compare the live HEAD to the tested SHA and fail early if they differ. Locking the live HEAD after testing is a race — `main` may have advanced between the e2e run and the lock step.
+
 **`.github/workflows/`, `Justfile`, `build_files/`, and `elements/` are CODEOWNERS-protected** — PRs touching these paths require maintainer review.
 
 ## PR Comment Policy
