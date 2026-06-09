@@ -147,3 +147,18 @@ jobs:
               --body "$PR_BODY"
             echo "Created new promotion PR"
           fi
+
+          PR_NUMBER=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --head "$PROMOTION_BRANCH" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$PR_NUMBER" ]; then
+            gh workflow run pr-release-gate.yml \
+              --repo "${{ github.repository }}" \
+              -f pr_number="${PR_NUMBER}"
+            echo "Dispatched pr-release-gate.yml for PR #${PR_NUMBER}"
+          fi
