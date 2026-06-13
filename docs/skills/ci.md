@@ -1605,3 +1605,37 @@ failure — promote proceeds either way.
 **Rule:** The per-merge gate should always be a deterministic boot
 check (SSH reachable + GDM active). The full AT-SPI suite belongs in
 the weekly pre-stable gate, not the per-merge pre-testing gate.
+
+### OSTREE_PATH in boot-check kernel args must come from the BLS entry (2026-06-13)
+
+When constructing QEMU kernel args for an inline boot check, the
+`ostree=` kernel argument requires the path in the format:
+
+```
+/ostree/boot.1/default/TREEHASH/N
+```
+
+where `TREEHASH` is the **ostree commit SHA** — a completely different
+hash from the deploy directory name (`/ostree/deploy/default/deploy/SHA.N`).
+Using the deploy directory path as the ostree= argument causes the initrd
+to fail to switch-root and the VM hangs silently.
+
+**Fix:** Read the exact path from the BLS (Boot Loader Specification)
+entry on the boot partition (p2). The entry already contains the correct
+`ostree=` value that the real bootloader would use:
+
+```bash
+sudo mkdir -p /mnt_boot
+sudo mount "${LOOP}p2" /mnt_boot
+OSTREE_PATH=$(sudo grep -rh '^options' /mnt_boot/loader/entries/*.conf 2>/dev/null \
+  | grep -o 'ostree=[^ ]*' | head -1 | sed 's/ostree=//')
+sudo umount /mnt_boot
+```
+
+**Also:** always detach the loopback device after unmounting the image
+before handing `disk.raw` to QEMU. Export the loop device name as a step
+output and run `sudo losetup -d "${LOOP}"` after `umount`. Leaving the loop
+device attached while QEMU holds the file open is a resource leak.
+
+**Disk partition layout from bootc:** p1=EFI, p2=/boot (BLS entries here),
+p3=/ (ostree deployments and the running rootfs).
