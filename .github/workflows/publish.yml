@@ -217,8 +217,26 @@ jobs:
           generate-sbom: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── Smoke gate ────────────────────────────────────────────────────────────
+  # Boots the just-published :$sha image and runs the full smoke suite before
+  # promoting to :testing. Catches GDM boot failures, composefs xattr regressions,
+  # and any other smoke-detectable breakage (see projectbluefin/dakota#841).
+  # NVIDIA is not tested here — smoke targets the default variant only.
+  smoke:
+    name: Smoke — boot gate
+    needs: [setup, publish-image]
+    if: needs.publish-image.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/run-testsuite.yml
+    with:
+      image: ghcr.io/${{ github.repository_owner }}/dakota:${{ needs.setup.outputs.sha }}
+      suites: smoke
+    secrets: inherit
+
   # ── Generate and attach SBOM ──────────────────────────────────────────────
-  # Runs in parallel with promote — SBOM generation is not on the critical path
+  # Runs in parallel with smoke — SBOM generation is not on the critical path
   # to :testing. A fresh runner fetches BST metadata from remote CAS (no full
   # artifact download needed; bst show reads element graph only).
   # P3: pip wheel cache keyed to the pinned buildstream-sbom commit SHA so
@@ -348,17 +366,17 @@ jobs:
             "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}@${SBOM_DIGEST}"
 
   # ── Promote :testing ──────────────────────────────────────────────────────
-  # Re-tags :$sha as :testing immediately after a successful publish-image.
-  # Runs in parallel with publish-sbom — no longer blocked by SBOM generation.
+  # Re-tags :$sha as :testing only after smoke passes.
   # Uses skopeo copy for server-side re-tagging: layers never leave the registry,
   # saving the 20–25 min round-trip of the previous podman pull→tag→push approach.
   # --preserve-digests keeps the promoted tag pointing at the signed manifest digest.
   # NVIDIA is continue-on-error so a failing NVIDIA promote does not
   # prevent the default :testing from landing.
   promote:
-    needs: [setup, publish-image]
+    needs: [setup, publish-image, smoke]
     if: >-
       needs.publish-image.result == 'success' &&
+      needs.smoke.result == 'success' &&
       (github.event_name == 'workflow_run' || github.ref_name == 'main')
     runs-on: ubuntu-24.04
     strategy:
