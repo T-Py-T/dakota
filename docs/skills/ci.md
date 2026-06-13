@@ -1579,3 +1579,29 @@ podman run --rm ... -v "${HOME}/.cache/pip:/root/.cache/pip:rw" ...
 **Rule:** Any `podman run -v HOST_PATH:...` where `HOST_PATH` is a cache
 directory that may not pre-exist must be preceded by `mkdir -p HOST_PATH`.
 Never rely on `actions/cache` to guarantee the directory exists.
+
+### Boot-check gate: inline QEMU boot vs AT-SPI smoke (2026-06-13)
+
+The testsuite `smoke` suite runs AT-SPI / GNOME Settings accessibility
+tests that take **80+ minutes** in a VM and fail on timing sensitivity
+in VMs, not on real image defects. Using it as a hard promote gate
+blocks `:testing` on every merge without catching real regressions
+(boot failures, composefs xattr breakage are caught by user reports,
+not AT-SPI tests).
+
+**Fixed in PR #849 / closes #850:**
+
+`publish.yml` now has two separate jobs:
+
+| Job | Gate type | What it checks | Target time |
+|---|---|---|---|
+| `boot-check` | **Hard** — blocks promote | bootc install → boot → SSH → `gdm active` | ~10 min |
+| `smoke` | Observational | Full testsuite smoke suite (AT-SPI etc.) | ~80 min |
+
+The `promote` job gates on `boot-check.result == 'success'`. Smoke
+runs in parallel for signal; its result is allowed to be success or
+failure — promote proceeds either way.
+
+**Rule:** The per-merge gate should always be a deterministic boot
+check (SSH reachable + GDM active). The full AT-SPI suite belongs in
+the weekly pre-stable gate, not the per-merge pre-testing gate.
