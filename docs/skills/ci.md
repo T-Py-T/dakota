@@ -1424,3 +1424,57 @@ is immediately available in GHCR before `publish-sbom` starts.
 Changed from `0 6 * * 1,4` (Mon/Thu) to `0 6 * * 1-5` (Mon–Fri).
 A junction ref bump on Tuesday left the CAS cold for 3 days, causing build.yml
 to timeout at 360 min. Daily warming caps the cold window at 1 day.
+
+### Promotion PR: force-push dismisses approvals even when diff is unchanged (2026-06-13)
+
+When `main` advances (e.g. Renovate merges) while a promotion PR has a
+maintainer approval, the promote workflow was rebuilding the squash branch
+and force-pushing — even though the effective diff against `main` was
+identical. GitHub dismisses approvals on **any** force-push regardless of
+content. The first approver had to re-approve on every unrelated commit
+landing on `main`, indefinitely.
+
+**Root cause:** the rebuild step always ran `git push --force` without checking
+whether the new squash content differed from the existing promotion branch.
+
+**Fix (actions#225):** tree-identity check before force-pushing:
+
+```bash
+NEW_TREE=$(git write-tree)
+EXISTING_TREE=$(git rev-parse "origin/${PROMOTION_BRANCH}^{tree}" 2>/dev/null || echo "")
+if [ "$NEW_TREE" = "$EXISTING_TREE" ] && [ -n "$EXISTING_TREE" ]; then
+  echo "promoted=skipped"   # skip push — approvals preserved
+else
+  git commit && git push --force
+  echo "promoted=true"      # content changed — new approval required (correct)
+fi
+```
+
+`promoted=skipped` passes all downstream `!= 'false'` guards — PR body and
+gate section still refresh. Only the push is skipped.
+
+**Rule:** Never force-push a promotion branch when the squash tree is unchanged.
+`git write-tree` before committing gives the tree hash of staged content without
+creating a commit.
+
+### Promotion PR: force-push clears reviewRequests — maintainers team not notified (2026-06-13)
+
+After a force-push, GitHub clears all pending reviewer requests. `reviewRequests`
+becomes `[]`. The team doesn't know re-review is needed; the PR sits blocked
+with no active requests.
+
+**Fix (actions#226):** re-request the maintainers team after any force-push:
+
+```bash
+if [ "${{ steps.rebuild.outputs.promoted }}" = "true" ]; then
+  gh pr edit "$PR_NUMBER" \
+    --add-reviewer "${{ github.repository_owner }}/maintainers" 2>/dev/null
+fi
+```
+
+Skip on `promoted=skipped` — approvals are preserved so no re-request is
+needed. Re-requesting when nothing changed would spam reviewers with no new
+content to review.
+
+**Both fixes are in `reusable-promote-squash.yml@v1`** and apply automatically
+to bluefin, bluefin-lts, and dakota.
