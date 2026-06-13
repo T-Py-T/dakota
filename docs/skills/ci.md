@@ -1553,3 +1553,29 @@ automatically.
 
 **Do not add a `/var/tmp` bind-mount workaround to individual workflows.** The fix
 belongs in the action, not scattered across consumers.
+
+### actions/cache does not create the cache directory on a cold miss — podman bind-mounts fail (2026-06-13)
+
+`actions/cache` only *restores* an existing archive; on a cache miss it does
+nothing and leaves the target path absent. If a subsequent `podman run` uses
+`-v "${HOME}/.cache/pip:/root/.cache/pip:rw"` and the host-side directory
+does not exist, podman exits **125** (container failed to start) before any
+command runs.
+
+```
+Error: statfs /home/runner/.cache/pip: no such file or directory
+error: recipe `sbom` failed with exit code 125
+```
+
+**Fix:** `mkdir -p` the directory in the Justfile recipe immediately before
+the `podman run`, not in the workflow step. This makes the fix unconditional
+regardless of where `just sbom` is invoked:
+
+```bash
+mkdir -p "${HOME}/.cache/pip"
+podman run --rm ... -v "${HOME}/.cache/pip:/root/.cache/pip:rw" ...
+```
+
+**Rule:** Any `podman run -v HOST_PATH:...` where `HOST_PATH` is a cache
+directory that may not pre-exist must be preceded by `mkdir -p HOST_PATH`.
+Never rely on `actions/cache` to guarantee the directory exists.
