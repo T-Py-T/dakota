@@ -113,7 +113,8 @@ git push --force-with-lease origin <branch-name>
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Build OOM or hangs | Memory pressure with 4 builders | Check element build resource usage |
-| "No space left on device" | BST cache fills runner disk | Check if any element generates large buildtrees |
+| "No space left on device" during **Chunkify** | Overlay copy-ups from `inject-xattrs.py` exhaust the ~1 GB root FS left by `setup-runner`'s BTRFS loopback | Fixed centrally in `chunka@v1` — auto-selects `/var/lib/containers` (BTRFS, ~49 GB) over `/var/tmp` (~1 GB) |
+| "No space left on device" during **Build** | BST cache fills runner disk | Check if any element generates large buildtrees |
 | `bootc container lint` fails | Image structure issues | Check OCI assembly, `/usr/etc` merge |
 | Build succeeds locally, fails in CI | Different cached versions | Compare `bst show` output; check remote CAS |
 | GHCR push fails | Token permissions | Check `packages: write` permission |
@@ -1502,3 +1503,53 @@ verified in both environments:
 - `ubuntu-24.04` GitHub Actions runner
 If the tool is only available on ubuntu-24.04, the Justfile recipe must install it explicitly
 (e.g. `dnf install -y buildah`) or the approach must avoid it entirely.
+
+### chunka overlay dirs must land on BTRFS, not root FS (2026-06-13)
+
+**Symptom:** `Chunkify image layers` step fails with:
+```
+No space left on device
+```
+The GitHub Actions runner terminates mid-step with a `System.IO.IOException` in the
+runner diagnostic log. The step is killed before `sudo umount` can run, leaving
+orphaned overlay mounts (cleaned up when the ephemeral runner terminates).
+
+**Root cause:** `chunka@v1` (BST path) creates three overlay work dirs — `UPPER`,
+`WORK`, `MERGED` — in `/var/tmp`. `setup-runner` mounts a BTRFS loopback over
+`/var/lib/containers` using `loopback-free: "1"`, leaving only ~1 GB free on the
+root filesystem. `inject-xattrs.py` sets `user.component` xattrs on every path in
+`files/fakecap-manifest.tsv` (700K+ entries). Each `setxattr` call on a regular
+file in an overlayfs triggers a **copy-up**: the entire file is copied to `UPPER`.
+Copy-ups from a full OS image easily exceed 1 GB, exhausting the root FS.
+
+**Fix (2026-06-13):** Fixed centrally in `projectbluefin/actions` `chunka@v1`
+(`bootc-build/chunka/action.yml`). At runtime, the action now picks the directory
+with the most free space from `[/var/lib/containers, /var/tmp]`:
+
+```bash
+_OVERLAY_TMPDIR="/var/tmp"
+for _candidate in /var/lib/containers /var/tmp; do
+  if [[ -d "$_candidate" ]]; then
+    _free=$(df --output=avail "$_candidate" 2>/dev/null | tail -1 || echo 0)
+    _best=$(df --output=avail "$_OVERLAY_TMPDIR" 2>/dev/null | tail -1 || echo 0)
+    if (( _free > _best )); then _OVERLAY_TMPDIR="$_candidate"; fi
+  fi
+done
+UPPER=$(mktemp -d -p "$_OVERLAY_TMPDIR")
+WORK=$(mktemp -d -p "$_OVERLAY_TMPDIR")
+MERGED=$(mktemp -d -p "$_OVERLAY_TMPDIR")
+```
+
+On CI runners with `setup-runner btrfs`, `/var/lib/containers` wins (~49 GB).
+On local dev machines `/var/tmp` is the fallback. The action also logs the chosen
+dir and available space for future diagnosis.
+
+The same fix was applied to the `chunkify` recipe in the dakota `Justfile`
+(used by `just build` for local dev).
+
+**The fix is in `@v1` — no dakota workflow changes required.** All callers of
+`chunka@v1` (default and nvidia variants across all branches) get the fix
+automatically.
+
+**Do not add a `/var/tmp` bind-mount workaround to individual workflows.** The fix
+belongs in the action, not scattered across consumers.
