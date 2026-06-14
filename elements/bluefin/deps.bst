@@ -35,9 +35,6 @@ depends:
   - bluefin/papers-thumbnailer.bst
   - bluefin/wallpapers.bst
 
-  - bluefin/jetbrains-mono.bst
-  - bluefin/jetbrains-mono-nerd-font.bst
-
   - bluefin/uutils-coreutils.bst
   - bluefin/sudo-rs.bst
   - bluefin/efibootmgr.bst
