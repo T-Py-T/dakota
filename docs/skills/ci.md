@@ -1637,5 +1637,149 @@ before handing `disk.raw` to QEMU. Export the loop device name as a step
 output and run `sudo losetup -d "${LOOP}"` after `umount`. Leaving the loop
 device attached while QEMU holds the file open is a resource leak.
 
-**Disk partition layout from bootc:** p1=EFI, p2=/boot (BLS entries here),
-p3=/ (ostree deployments and the running rootfs).
+**Disk partition layout from bootc (systemd-boot, x86-64):**
+- p1 = BIOS boot (1 MiB, grub fallback — no filesystem)
+- p2 = EFI System / xbootldr (512 MiB, FAT32, BLS entries at `loader/entries/*.conf`)
+- p3 = Linux root (xfs, ostree deployments live here)
+
+Mount p2 to read BLS entries (it is the EFI partition, not a separate `/boot`).
+Mount p3 to find the ostree deployment directory.
+
+### `testing` branch divergence breaks `Sync main → testing` permanently (2026-06-14)
+
+`reusable-sync-branches.yml` uses `git merge`. When `testing` has commits
+`main` doesn't (diverged), the merge exits 1 and **every subsequent push to
+`main` re-triggers the same failure** — the pipeline is stuck until a human
+manually resets `testing`.
+
+**How divergence happens:** Renovate PRs land on `testing` (digest bumps) while
+human PRs land on `main` touching the same files (`publish.yml`, `Justfile`).
+The two branches accumulate incompatible histories on the same paths.
+
+**Emergency reset (API — no local clone needed):**
+```bash
+MAIN_SHA=$(gh api repos/projectbluefin/dakota/branches/main --jq '.commit.sha')
+gh api repos/projectbluefin/dakota/git/refs/heads/testing \
+  -X PATCH --field sha="$MAIN_SHA" --field force=true
+```
+
+**Systemic fix:** `projectbluefin/actions` PR #237 adds divergence detection to
+`reusable-sync-branches.yml`. When `ahead > 0`, force-reset instead of merge:
+```bash
+AHEAD=$(git rev-list --count "origin/main..origin/testing")
+if [ "$AHEAD" -gt 0 ]; then
+  git reset --hard origin/main && git push --force origin testing
+else
+  git merge origin/main ...
+fi
+```
+Safe: all testing-only commits are Renovate digests that Renovate recreates automatically.
+
+**Diagnosis commands:**
+```bash
+# Check branch status
+gh api repos/projectbluefin/dakota/compare/testing...main \
+  --jq '{ahead_by:.ahead_by, behind_by:.behind_by, status:.status}'
+# List last sync run results
+gh run list --repo projectbluefin/dakota \
+  --workflow 'Sync main → testing' --limit 5 \
+  --json conclusion,displayTitle --jq '.[] | "\(.conclusion) \(.displayTitle[:50])"'
+```
+
+### `pr-triage.yml` approval said "auto-merge eligible" but never enabled it (2026-06-14)
+
+The `Approved — clear label` step removed `pr/needs-review` and posted
+_"Auto-merge is now eligible"_ but **never called `gh pr merge --auto`**.
+PRs sat approved indefinitely.
+
+**Fixed in PR #858:**
+1. After approval: `gh pr merge "$PR_URL" --auto --squash`
+2. After approval: `gh pr update-branch "$PR_URL"` (brings branch current so CI runs)
+3. New `pr-autoupdate.yml` fires on every push to `main`, calls `gh pr update-branch`
+   on all `BEHIND` PRs targeting main (skips Renovate/Mergeraptor bots)
+
+**Also required:** `validate` must be in branch protection required status checks
+so `--auto` waits for CI before merging, not just for review approval.
+
+```bash
+# Add validate as required check (branch protection API)
+gh api repos/projectbluefin/dakota/branches/main/protection \
+  --method PUT \
+  --input - << 'JSON'
+{
+  "required_status_checks": {"strict": false, "checks": [{"context": "validate", "app_id": -1}]},
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true, "require_code_owner_reviews": true,
+    "required_approving_review_count": 1
+  },
+  "restrictions": null
+}
+JSON
+```
+
+**Rule:** never post "auto-merge is eligible" in a comment without also calling
+`gh pr merge --auto`. The comment is a lie otherwise.
+
+### `bootc install to-disk --via-loopback` fails with "No root filesystem specified" (2026-06-14)
+
+Newer bootc no longer defaults the root filesystem type. Without
+`[install.filesystem.root] type = "xfs"` in the image's install config,
+`bootc install to-disk` exits 1 with `error: Installing to disk: No root
+filesystem specified`.
+
+**Fix:** add to `files/bootc-install/00-defaults.toml`:
+```toml
+[install.filesystem.root]
+type = "xfs"
+```
+
+No behaviour change for users — xfs was always the implicit default. This makes it explicit.
+
+### `bootc install to-disk --via-loopback` partition nodes invisible inside container (2026-06-14)
+
+`--via-loopback` creates the loopback device **inside the container**.
+The host kernel creates partition device nodes (`/dev/loop0p2`, `/dev/loop0p3`)
+asynchronously via `BLKRRPART`, but they are not visible inside the container
+in time for bootc's immediate `mkfs.xfs` call. Result:
+
+```
+Creating root filesystem (xfs) on device /dev/loop0p3
+error: Installing to disk: Creating rootfs: No such file or directory (os error 2)
+```
+
+**Fix (PR #864):** pre-create the loopback device on the **host** before the
+container starts, then pass the real block device path directly to bootc:
+
+```bash
+fallocate -l 30G disk.raw
+LOOP=$(sudo losetup -f --show disk.raw)         # host creates the loop device
+echo "BOOT_CHECK_LOOP=${LOOP}" >> "$GITHUB_ENV"
+
+sudo podman run --rm --privileged \
+  -v /dev:/dev --pid=host -v "$(pwd):/data:rw" \
+  "${IMAGE}" bootc install to-disk \
+    --skip-fetch-check \
+    "${LOOP}" \                                  # real block device, not --via-loopback
+  || echo "bootc install exited $? (bootupd expected — continuing)"
+
+sudo partprobe "${LOOP}" 2>/dev/null || true     # ensure partition nodes exist
+sudo udevadm settle --timeout=30 2>/dev/null || true
+```
+
+In the extract step, reuse the pre-attached loop instead of creating a new one:
+```bash
+LOOP="${BOOT_CHECK_LOOP}"
+if [ -z "${LOOP}" ] || ! sudo losetup "${LOOP}" &>/dev/null; then
+  LOOP=$(sudo losetup -f --show -P disk.raw)
+  sudo udevadm settle --timeout=10 2>/dev/null || true
+fi
+```
+
+**Why this works:** the host kernel owns the loop device, so partition nodes
+appear in the host's `/dev`, which is bind-mounted into the container via
+`-v /dev:/dev`. The container sees them as soon as the host kernel creates them.
+
+**Note:** The boot-check gate (introduced PR #849, 2026-06-13) **never passed
+once** due to these two compounding bugs. Both were in the CI script, not the
+image. The image always worked on real hardware.
