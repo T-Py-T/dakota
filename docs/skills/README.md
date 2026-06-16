@@ -5,6 +5,24 @@ should read the relevant file before starting in that area.
 
 If your first instinct is `dnf`, RPM/COPR, or a Containerfile package layer, you are in the wrong mental model. In this repo, historical `bluefin/` paths still contain Dakota's BuildStream elements; package changes happen there, not in Containerfile overlays.
 
+## Docs-and-code-first — no guessing
+
+**This project is well-documented. Everything has a source of truth. Look it up.**
+
+Before implementing anything, in this order:
+1. **Check `docs/skills/`** — the relevant skill file likely already has the answer, including known failure modes and correct patterns.
+2. **Read the actual file or workflow** being changed — not just the file name.
+3. **Check upstream docs via Context7** for any external tool (bootc, BuildStream, skopeo, cosign, GitHub Actions). `resolve-library-id` → `query-docs`.
+4. **Check working reference implementations** in this org (e.g., `projectbluefin/testsuite`, `projectbluefin/actions`) before writing from scratch.
+
+**If you are about to guess: stop.** Find the authoritative source. Guessing at CLI flags, API behavior, or workflow structure costs hours of CI time. The documented answer is almost always available and faster to find than to iterate toward.
+
+**Examples:**
+- `bootc install to-disk` → read `/bootc-dev/bootc` docs via Context7, or look at `testsuite/spike-uefi-boot.yml` for a working GHA reference
+- BuildStream element fields → `docs/skills/buildstream.md` + `/buildstream-project/buildstream` via Context7
+- cosign/skopeo/oras flags → Context7 before trying flags at random
+- GitHub Actions `needs:` vs `if:` behavior → `docs/skills/ci.md` first
+
 When you discover a new pattern or fix a recurring mistake, add it here in the
 same PR as your change. This is the Self-Improvement Loop: lessons land here and help
 every future agent and contributor — not just you, and not just on one machine.

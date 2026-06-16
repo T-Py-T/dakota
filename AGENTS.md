@@ -112,6 +112,18 @@ Non-compliance = automatic rejection.
 
 **Read-First:** Read `README.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `docs/SKILL.md` before modifying anything. Do not assume project structure or patterns.
 
+**Docs-and-code-first — no guessing:** This project and every tool it uses is well-documented. Before writing any implementation:
+1. Check `docs/skills/` for the relevant skill file — it likely already has the answer.
+2. If the answer involves an external tool (bootc, BuildStream, GitHub Actions, skopeo, cosign, etc.), look up the official docs via Context7 (`resolve-library-id` → `query-docs`) or read the source. Both are faster and more accurate than iterating blind.
+3. If the answer involves a workflow or script in this repo, read the file before touching it.
+4. **If you are about to guess, stop.** Find the authoritative source first. Guessing costs hours of CI time and human attention. There is almost always a documented answer.
+
+Examples of what "check the docs" means in practice:
+- `bootc install to-disk` behavior → read `bootc-dev/bootc` docs or source, or check `projectbluefin/testsuite` for a working reference implementation
+- BuildStream element syntax → `docs/skills/buildstream.md` + Context7 `/buildstream-project/buildstream`
+- GitHub Actions workflow behavior → `docs/skills/ci.md` first, then Context7
+- cosign/skopeo flags → Context7 before trying flags at random
+
 **Operator accountability:** The human deploying the agent is responsible for all decisions. PR template checkbox: `[ ] I am using an agent and I take responsibility for this PR`
 
 **Verification:** Every PR must confirm `just lint` passed and the image booted. Use `just boot-test` for automated pass/fail. No WIP PRs.

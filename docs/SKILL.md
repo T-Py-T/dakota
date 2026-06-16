@@ -4,10 +4,21 @@ Agent entry point. Load only the skill for your current task — do not load eve
 
 If your first draft says "use dnf/RPM/COPR" or "edit the Containerfile to add a package", stop and reload `docs/skills/not-bluefin.md`. Dakota image changes happen in `.bst` elements and `elements/bluefin/deps.bst`, even though those paths still say `bluefin`.
 
+## Docs-and-code-first — no guessing
+
+**This project and every tool it uses is well-documented. There is almost never a reason to guess.**
+
+Before writing any implementation:
+1. **Check the relevant skill file** in `docs/skills/` — known patterns and failure modes are documented there.
+2. **Read the actual file** you are about to change.
+3. **Check upstream docs** for any external tool via Context7 (`resolve-library-id` → `query-docs`): bootc, BuildStream, skopeo, cosign, GitHub Actions, GNOME, etc.
+4. **Check working reference implementations** in this org before writing from scratch — `projectbluefin/testsuite`, `projectbluefin/actions`, `projectbluefin/bluefin` often have solved the same problem.
+
+If you are about to try a flag, API call, or workflow pattern from memory: stop and verify it first. Guessing costs CI time and human attention that the project cannot afford.
+
 ## Task → Skill
 
 | I need to... | Load |
-|---|---|
 | **Load the dakota build context first** | **⚠️ REQUIRED FIRST — `docs/skills/not-bluefin.md` before any other skill, especially if you have bluefin context. If your plan mentions dnf/RPM/Containerfile overlays, reload it and translate the task into BST terms first.** |
 | Review a pull request | `docs/workflow.md` + `docs/pr-checklist.md` |
 | Add a package to Dakota | `docs/skills/add-package.md` |
