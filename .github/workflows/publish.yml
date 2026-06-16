@@ -679,11 +679,10 @@ jobs:
   # NVIDIA is continue-on-error so a failing NVIDIA promote does not
   # prevent the default :testing from landing.
   promote:
-    needs: [setup, publish-image, boot-check, smoke]
+    needs: [setup, publish-image, boot-check]
     if: >-
       needs.publish-image.result == 'success' &&
       needs.boot-check.result == 'success' &&
-      (needs.smoke.result == 'success' || needs.smoke.result == 'failure') &&
       (github.event_name == 'workflow_run' || github.ref_name == 'main')
     runs-on: ubuntu-24.04
     strategy:
