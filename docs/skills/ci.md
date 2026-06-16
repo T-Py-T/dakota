@@ -1354,15 +1354,20 @@ BST artifact cache steps remain gated on `merge_group || schedule || workflow_di
 `publish.yml` was restructured to remove three major bottlenecks. New job graph:
 
 ```
-setup → publish-image → promote     (critical path to :testing: ~50–80 min)
-              └──────→ publish-sbom  (runs in parallel with promote)
+setup → publish-image → boot-check → promote   (critical path to :testing: ~46 min)
+              ├──────→ smoke                    (observational, ~90 min, does NOT block promote)
+              └──────→ publish-sbom             (runs in parallel, does NOT block promote)
 ```
 
 **Job renames / splits:**
 - `publish` renamed to `publish-image` — exports OCI, pushes `:$sha`, signs. No SBOM.
 - `publish-sbom` (new) — depends on `publish-image`, runs in parallel with `promote`.
   Contains: SBOM generation, artifact upload, oras attach, cosign sign SBOM.
-- `promote` — now depends on `publish-image` only (not SBOM). Saves 10–15 min.
+- `promote` — depends on `[setup, publish-image, boot-check]` only. Neither SBOM nor smoke are in `needs`.
+
+**Critical:** Do NOT add `smoke` to `promote.needs`. Smoke is observational (~90 min) and was previously
+blocking promote despite the `if:` condition allowing pass or fail. Removing it from `needs` saves ~85 min
+on the critical path to `:testing`. Fixed 2026-06-16 (#890).
 
 **skopeo copy in promote (P1):**
 The old `podman pull → tag → push` pattern transferred the full 8.5 GB image
@@ -1599,8 +1604,9 @@ not AT-SPI tests).
 | `smoke` | Observational | Full testsuite smoke suite (AT-SPI etc.) | ~80 min |
 
 The `promote` job gates on `boot-check.result == 'success'`. Smoke
-runs in parallel for signal; its result is allowed to be success or
-failure — promote proceeds either way.
+runs in parallel for signal and does NOT appear in `promote.needs` —
+removing it from `needs` is what makes it truly non-blocking (an `if:`
+condition alone is insufficient; the job still waits if the dep is in `needs`).
 
 **Rule:** The per-merge gate should always be a deterministic boot
 check (SSH reachable + GDM active). The full AT-SPI suite belongs in
