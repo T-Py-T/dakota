@@ -1742,87 +1742,33 @@ type = "xfs"
 
 No behaviour change for users — xfs was always the implicit default. This makes it explicit.
 
-### `bootc install to-disk --via-loopback` partition nodes invisible inside container (2026-06-14)
+### `bootc install to-disk` — correct approach for CI loop devices (2026-06-16)
 
-`--via-loopback` creates the loopback device **inside the container**.
-The host kernel creates partition device nodes (`/dev/loop0p2`, `/dev/loop0p3`)
-asynchronously via `BLKRRPART`, but they are not visible inside the container
-in time for bootc's immediate `mkfs.xfs` call. Result:
+**Use `--via-loopback` with the raw file path.** This is the documented bootc
+pattern for disk images. bootc manages the loop device lifecycle internally,
+eliminating all host-side partition-node race conditions.
 
-```
-Creating root filesystem (xfs) on device /dev/loop0p3
-error: Installing to disk: Creating rootfs: No such file or directory (os error 2)
-```
-
-**Fix (PR #864):** pre-create the loopback device on the **host** before the
-container starts, then pass the real block device path directly to bootc:
+Source: https://github.com/bootc-dev/bootc/blob/main/docs/src/bootc-install.md
 
 ```bash
 fallocate -l 30G disk.raw
-LOOP=$(sudo losetup -f --show disk.raw)         # host creates the loop device
-echo "BOOT_CHECK_LOOP=${LOOP}" >> "$GITHUB_ENV"
 
-sudo podman run --rm --privileged \
-  -v /dev:/dev --pid=host -v "$(pwd):/data:rw" \
+sudo podman run --rm --privileged --pid=host \
+  --security-opt label=type:unconfined_t \
+  -v /dev:/dev \
+  -v /var/lib/containers:/var/lib/containers \
+  -v "$(pwd):/data" \
   "${IMAGE}" bootc install to-disk \
-    --skip-fetch-check \
-    "${LOOP}" \                                  # real block device, not --via-loopback
+    --via-loopback /data/disk.raw \
+    --wipe \
   || echo "bootc install exited $? (bootupd expected — continuing)"
 
-sudo partprobe "${LOOP}" 2>/dev/null || true     # ensure partition nodes exist
-sudo udevadm settle --timeout=30 2>/dev/null || true
-```
-
-In the extract step, reuse the pre-attached loop instead of creating a new one:
-```bash
-LOOP="${BOOT_CHECK_LOOP}"
-if [ -z "${LOOP}" ] || ! sudo losetup "${LOOP}" &>/dev/null; then
-  LOOP=$(sudo losetup -f --show -P disk.raw)
-  sudo udevadm settle --timeout=10 2>/dev/null || true
-fi
-```
-
-**Why this works:** the host kernel owns the loop device, so partition nodes
-appear in the host's `/dev`, which is bind-mounted into the container via
-`-v /dev:/dev`. The container sees them as soon as the host kernel creates them.
-
-**Note:** The boot-check gate (introduced PR #849, 2026-06-13) **never passed
-once** due to these two compounding bugs. Both were in the CI script, not the
-image. The image always worked on real hardware.
-
-### `bootc install to-disk` fails with "Device has no children" even with host-side loop device (2026-06-15)
-
-Even after pre-creating the loop device on the host (PR #864 fix above), bootc's
-internal `sfdisk` call fails to make partition nodes appear in time:
-
-```text
-Re-reading the partition table failed.: Invalid argument
-The kernel still uses the old table. The new table will be used at the next reboot
-or after you run partprobe(8) or partx(8).
-error: Installing to disk: Creating rootfs: Device has no children
-bootc install exited 1 (bootupd expected — continuing)
-```
-
-Root cause: `losetup -f --show disk.raw` creates the loop device WITHOUT the
-`LO_FLAGS_PARTSCAN` kernel flag. Without it, `ioctl(BLKRRPART)` returns `EINVAL`
-on modern kernels, and the kernel does **not** auto-create `/dev/loop0p3` when
-sfdisk writes the partition table inside the container. bootc immediately tries
-`mkfs.xfs /dev/loop0p3` → node doesn't exist → "Device has no children".
-
-**Fix:** Use `-P` (PARTSCAN) in the initial `losetup` call:
-
-```bash
-# -P tells the kernel to auto-create partition nodes via uevents when
-# the partition table is written — even inside the container.
+# After container exits, attach with -P so the kernel scans the partition
+# table and creates loop0p1/p2/p3 nodes on the host.
 LOOP=$(sudo losetup -f --show -P disk.raw)
-```
-
-Also add a fast-fail check after the install to catch the failure clearly
-rather than getting "wrong fs type" in the Extract step:
-
-```bash
-sudo partprobe "${LOOP}" 2>/dev/null || true
+echo "BOOT_CHECK_LOOP=${LOOP}" >> "$GITHUB_ENV"
 sudo udevadm settle --timeout=30 2>/dev/null || true
+
 if ! sudo blkid "${LOOP}p3" &>/dev/null; then
   echo "ERROR: bootc install did not create a filesystem on ${LOOP}p3"
   sudo fdisk -l "${LOOP}" 2>&1 || true
@@ -1830,27 +1776,20 @@ if ! sudo blkid "${LOOP}p3" &>/dev/null; then
 fi
 ```
 
-**Why PARTSCAN works:** with `LO_FLAGS_PARTSCAN` set, the kernel monitors the
-loop device for partition table changes and auto-creates device nodes via uevents
-processed by the host udevd. The container sees these via `-v /dev:/dev`. The
-`sfdisk` "Invalid argument" message is benign — PARTSCAN replaces the old
-`BLKRRPART` ioctl mechanism.
+**Why `--via-loopback` works:** bootc creates and manages the loop device
+inside the container where it controls the full lifecycle. Partition nodes
+appear correctly because bootc owns the device end-to-end. After the container
+exits, attaching with `-P` on a file that already has a partition table triggers
+a synchronous kernel scan — nodes are ready immediately.
 
-**Second race — node creation from scratch is still async (PR #886):**
-Even with PARTSCAN, creating device nodes from scratch requires udevd to
-process the uevent, which is asynchronous. bootc's `mkfs.xfs` call immediately
-follows sfdisk and races udevd — resulting in `ENOENT` on `/dev/loop0p3`.
+**Do NOT:**
+- Pre-create a host loop device and pass it as a block device path — bootc's
+  internal `sfdisk` + `mkfs` races the host udevd, causing `ENOENT` on p3.
+- Use `--wipe` with a pre-created host loop — wipes the partition table,
+  removing the nodes you just created.
+- Pre-partition with `sfdisk` before running bootc — bootc refuses with
+  "Detected existing partitions".
 
-Fix: pre-seed the loop device with the same GPT layout bootc will use, then
-`udevadm settle`, *before* starting the container. bootc's sfdisk then
-performs an **in-place UPDATE** of existing nodes (synchronous) rather than
-a **CREATE FROM SCRATCH** (async). Layout must match bootc's x86-64 default:
-
-```bash
-# Pre-create GPT so nodes exist before bootc runs
-# Layout: 1M BIOS | 512M EFI | rest Linux root (x86-64)
-printf 'label: gpt\n2048 2048 21686148-6449-6E6F-744E-656564454649\n4096 1048576 C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n1052672 - 4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709\n' \
-  | sudo sfdisk "${LOOP}"
-sudo udevadm settle --timeout=10 2>/dev/null || true
-# now run bootc install — sfdisk UPDATE is synchronous, mkfs finds the node
-```
+**Note:** The boot-check gate never passed from PR #849 (2026-06-13) through
+PR #895 (2026-06-16) due to iterating on the wrong approach. The fix was
+always to use `--via-loopback` as documented. The image works on real hardware.

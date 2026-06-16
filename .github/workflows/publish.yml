@@ -258,41 +258,28 @@ jobs:
         run: |
           set -euo pipefail
           fallocate -l 30G disk.raw
-          # Attach WITHOUT -P so bootc sees a blank device (no pre-existing
-          # partitions) and installs cleanly. After install, detach and
-          # re-attach WITH -P to force the kernel to rescan and materialise
-          # loop0p1/p2/p3 nodes reliably before the next step mounts them.
-          # Why not -P from the start: with -P, sfdisk inside the bootc
-          # container triggers ioctl(BLKRRPART) which returns EINVAL on loop
-          # devices, so nodes never appear → ENOENT on p3. Re-attaching after
-          # install works because -P on a device that already has a partition
-          # table causes an immediate synchronous kernel scan.
-          LOOP=$(sudo losetup -f --show disk.raw)
-          echo "Host loop device: ${LOOP}"
-          echo "BOOT_CHECK_LOOP=${LOOP}" >> "$GITHUB_ENV"
-          # bootupd exits 1 in plain VMs (no EFI partition target) — expected.
-          if sudo podman run --rm --quiet "${IMAGE}" bootc install to-disk --help 2>&1 | grep -q '\-\-bootloader'; then
-            sudo podman run --rm --privileged \
-              -v /dev:/dev --pid=host -v "$(pwd):/data:rw" \
-              "${IMAGE}" bootc install to-disk \
-                --skip-fetch-check \
-                "${LOOP}" \
-              || echo "bootc install exited $? (bootupd expected — continuing)"
-          else
-            sudo podman run --rm --privileged \
-              -v /dev:/dev --pid=host -v "$(pwd):/data:rw" \
-              "${IMAGE}" bootc install to-disk \
-                "${LOOP}" \
-              || echo "bootc install exited $? (bootupd expected — continuing)"
-          fi
+          # Use --via-loopback: pass the raw file path directly into the
+          # container. bootc manages the loop device lifecycle internally,
+          # avoiding the host-side loop/partition-node race entirely.
+          # After the container exits the raw file has a complete partition
+          # table; attach with -P to materialise loop0p1/p2/p3 on the host.
+          # Source: https://github.com/bootc-dev/bootc/blob/main/docs/src/bootc-install.md
+          sudo podman run --rm --privileged --pid=host \
+            --security-opt label=type:unconfined_t \
+            -v /dev:/dev \
+            -v /var/lib/containers:/var/lib/containers \
+            -v "$(pwd):/data" \
+            "${IMAGE}" bootc install to-disk \
+              --via-loopback /data/disk.raw \
+              --wipe \
+            || echo "bootc install exited $? (bootupd expected — continuing)"
           sudo podman rmi "${IMAGE}" 2>/dev/null || true
-          # Detach and re-attach with -P to force partition node creation.
-          sudo losetup -d "${LOOP}"
+          # Attach with -P so the kernel scans the partition table and
+          # creates loop0p1/p2/p3 nodes before the next step mounts them.
           LOOP=$(sudo losetup -f --show -P disk.raw)
           echo "BOOT_CHECK_LOOP=${LOOP}" >> "$GITHUB_ENV"
           sudo udevadm settle --timeout=30 2>/dev/null || true
-          # Verify root filesystem was created — fail fast with a clear error
-          # rather than the confusing "wrong fs type" message in the Extract step.
+          # Verify root filesystem was created — fail fast with a clear error.
           if ! sudo blkid "${LOOP}p3" &>/dev/null; then
             echo "ERROR: bootc install did not create a filesystem on ${LOOP}p3"
             sudo fdisk -l "${LOOP}" 2>&1 || true
