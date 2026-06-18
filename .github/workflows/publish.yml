@@ -323,9 +323,15 @@ jobs:
           # filesystem. bootc writes /ostree/boot.1/default/TREEHASH/N
           # regardless of bootloader mode. Fresh install always has exactly
           # one deployment so sort | head -1 is deterministic.
+          # Note: boot.1/default/TREEHASH/N is a symlink — omit -type d so
+          # find matches symlinks as well as directories.
           OSTREE_PATH=$(sudo find /mnt/ostree/boot.1/default -mindepth 2 -maxdepth 2 \
-            -type d 2>/dev/null | sort | head -1 | sed 's|^/mnt||')
-          [[ -z "${OSTREE_PATH}" ]] && { echo "ERROR: could not find OSTREE_PATH in /ostree/boot.1"; exit 1; }
+            2>/dev/null | sort | head -1 | sed 's|^/mnt||')
+          if [[ -z "${OSTREE_PATH}" ]]; then
+            echo "DEBUG: boot.1 tree:"
+            sudo find /mnt/ostree/boot.1 -maxdepth 4 2>/dev/null || echo "  (empty or missing)"
+            echo "ERROR: could not find OSTREE_PATH in /ostree/boot.1"; exit 1
+          fi
           echo "ostree_path=${OSTREE_PATH}"
 
           # Pick kernel version that has vmlinuz
