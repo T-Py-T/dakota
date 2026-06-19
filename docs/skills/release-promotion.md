@@ -107,3 +107,51 @@ gh run list --repo projectbluefin/dakota --workflow 'Promote testing to main' --
 - [ ] Reusable caller permissions were validated if the gate did not start
 - [ ] You did not collapse publish, promotion, and stable release into one mental model
 - [ ] Any change preserves the factory's intended human approval gates
+
+---
+
+## How to cut a stable release
+
+```bash
+gh workflow run execute-release.yml --repo projectbluefin/dakota
+```
+
+That is the entire release command. `execute-release.yml` is always triggered
+via `workflow_dispatch` by a human. It is NOT automatically triggered by a
+promotion PR merging.
+
+The `check-trigger` job in `execute-release.yml` also accepts commit messages
+starting with `^ci: promote testing images to stable`, but in practice every
+stable release since the pipeline was built has been a manual dispatch.
+
+---
+
+## Lessons Learned
+
+### The promotion PR is git housekeeping, not the release trigger (2026-06-19)
+
+**Mistake:** Closing the open promotion PR (#901) because its squash branch was
+deleted, then concluding "nothing to promote" and telling the maintainer the
+factory was healthy — while they had been trying to cut a stable release all day.
+
+**Reality:**
+- The promotion PR (`auto/promote-testing-to-main`) squash-merges the `testing`
+  git branch into `main`. This is a git bookkeeping operation.
+- It does **not** cut a stable release. The stable release is always a separate
+  manual `workflow_dispatch` on `execute-release.yml`.
+- `testing` git branch == `main` tree does NOT mean "nothing to release". It
+  means the git trees are in sync. A new `:stable` OCI image can still be cut
+  from whatever `:testing` currently points to.
+
+**Rule:** Never close a promotion PR that has maintainer approval. If the squash
+branch is deleted, rebuild it by re-running `promote-testing-to-main.yml` — do
+not close the PR and re-run, because re-running after the trees are in sync will
+say "nothing to promote" and leave no path to the release.
+
+**Recovery when promotion PR was incorrectly closed:**
+```bash
+# Re-run promote — if testing != main tree it opens a fresh PR
+gh workflow run promote-testing-to-main.yml --repo projectbluefin/dakota
+# If testing == main tree (promote says "nothing to promote"), cut stable directly:
+gh workflow run execute-release.yml --repo projectbluefin/dakota
+```
