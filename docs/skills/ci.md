@@ -1959,3 +1959,46 @@ After using this router, confirm:
 - [ ] You read the actual workflow being changed
 - [ ] Any GitHub Actions or bootc syntax change was verified via Context7
 - [ ] The lesson landed in a focused skill, not as more sprawl in the router
+### Promotion PR stuck at UNKNOWN mergeability (2026-06-19)
+
+**Symptom:** Promotion PR shows `mergeable: UNKNOWN` / `mergeStateStatus: UNKNOWN`
+permanently. Web UI shows "Checking for the ability to merge automatically..." and
+never resolves. `gh pr merge --squash` errors with "Head branch is out of date."
+
+**Root cause:** `sync-main-to-testing.yml` fires on every push to `main` and its
+`cleanup-squash-branch` job unconditionally deletes `auto/promote-testing-to-main`.
+If any normal PR merges to `main` while a promotion PR is open, the squash branch
+gets deleted. GitHub then permanently reports `UNKNOWN` mergeability for that PR.
+
+**Recovery:**
+```bash
+gh pr close <promotion-pr> --repo projectbluefin/dakota \
+  --comment "Closing — squash branch was deleted. Re-triggering."
+gh workflow run promote-testing-to-main.yml --repo projectbluefin/dakota
+```
+
+**Systemic fix:** PR #931 guards the cleanup step — it skips deletion when an
+open PR targets the squash branch. Also fixed in `projectbluefin/actions`:
+`reusable-promote-squash.yml` now has `contents: write` and `pull-requests: write`
+so `gh pr merge --auto` actually enables auto-merge on creation.
+
+---
+
+### `gh pr merge --auto` requires `contents: write` in reusable workflows (2026-06-19)
+
+When a reusable workflow declares `permissions: contents: read`, GitHub restricts
+it to read-only even if the caller grants `write`. `gh pr merge --auto` silently
+fails — the PR gets no auto-merge flag and the maintainer sees "Enable automerge".
+
+**Fix:** Add `contents: write` (and `pull-requests: write`) to the reusable
+workflow's `permissions` block. Applied to:
+- `projectbluefin/actions/reusable-promote-squash.yml` (promotion PRs)
+- `projectbluefin/dakota/.github/workflows/pr-triage.yml` (regular PRs via #927)
+
+**Diagnostic:** Check `autoMergeRequest` is non-null after the workflow runs:
+```bash
+gh pr view <n> --repo projectbluefin/dakota --json autoMergeRequest \
+  --jq '.autoMergeRequest != null'
+```
+If `false`, the `gh pr merge --auto` call failed — check the workflow's declared
+`permissions` first.
