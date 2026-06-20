@@ -1,0 +1,145 @@
+# .github/workflows/build-aarch64.yml
+# Builds the aarch64 Dakota OCI image from source on a native arm64 runner and
+# pushes it to this fork's GHCR. Fork-local feature: upstream's build.yml has an
+# aarch64 job that is disabled pending investigation.
+# Does NOT build the nvidia variant (pointless on aarch64/Apple Silicon) and does
+# NOT touch the x86_64 build, publish, ISO, or promotion pipelines.
+#
+# Why this exists as a separate workflow instead of re-enabling build.yml's job:
+#   1. The Justfile `bst` recipe auto-injects `-o x86_64_v3 true` when the flag is
+#      absent. On aarch64 that poisons BuildStream cache keys so they no longer
+#      match gbm.gnome.org's prebuilt aarch64 artifacts, forcing a full cold
+#      rebuild of GNOME -> OOM/timeout. We bypass it with BST_FLAGS_OVERRIDE and
+#      force `-o x86_64_v3 false`.
+#   2. This fork has no CASD_CLIENT_* secrets, so the authenticated push-cache is
+#      skipped. The public read caches in project.conf (gbm.gnome.org:11003,
+#      cache.projectbluefin.io:11001) still serve prebuilt aarch64 artifacts.
+
+name: Build Dakota aarch64 OCI
+
+# Triggers on push to the dedicated test branch so `main` stays clean for
+# upstream syncing. A push-triggered workflow runs the version on the pushed
+# branch, so this file never needs to live on the default branch.
+on:
+  push:
+    branches:
+      - feat/arm64-iso-build
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 'Push the built image to GHCR'
+        type: boolean
+        default: true
+
+permissions: read-all
+
+env:
+  IMAGE_NAME: dakota
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-aarch64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 420
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup runner
+        uses: projectbluefin/actions/bootc-build/setup-runner@v1
+        with:
+          storage-backend: btrfs
+          update-podman: true
+          install-tools: '["just"]'
+
+      - name: Capture build timestamp
+        id: timestamp
+        run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # GHCR/OCI repository names must be lowercase; this fork's owner (T-Py-T)
+      # has uppercase letters, so lowercase the registry before tag/push.
+      - name: Compute lowercase registry
+        run: |
+          echo "REGISTRY_LC=$(echo '${{ env.IMAGE_REGISTRY }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      # No remote execution: the fork has no CASD creds. Artifacts are still
+      # pulled from the public read caches declared in project.conf.
+      - name: Generate BuildStream CI config
+        env:
+          CASD_CLIENT_CERT: ${{ vars.CASD_CLIENT_CERT }}
+          CASD_CLIENT_KEY: ${{ secrets.CASD_CLIENT_KEY }}
+        uses: ./.github/actions/generate-bst-ci-config
+        with:
+          enable-remote-execution: 'false'
+
+      # BST_FLAGS_OVERRIDE is used verbatim by the Justfile `bst` recipe, which
+      # skips the x86_64_v3=true auto-injection. We pin x86_64_v3=false so cache
+      # keys match the prebuilt aarch64 artifacts on gbm.gnome.org.
+      - name: Build OCI image with BuildStream (aarch64)
+        env:
+          BST_FLAGS_OVERRIDE: -o arch aarch64 -o x86_64_v3 false --no-interactive --config /src/buildstream-ci.conf
+        run: just bst build oci/bluefin.bst
+        timeout-minutes: 410
+
+      - name: Export OCI image from BuildStream
+        id: export
+        env:
+          BST_FLAGS_OVERRIDE: -o arch aarch64 -o x86_64_v3 false --no-interactive --config /src/buildstream-ci.conf
+          BUILD_IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          OCI_IMAGE_CREATED: ${{ steps.timestamp.outputs.created }}
+          OCI_IMAGE_REVISION: ${{ github.sha }}
+          OCI_IMAGE_VERSION: aarch64
+        run: |
+          just export default
+          echo "image_ref=${{ env.IMAGE_NAME }}:aarch64" >> "$GITHUB_OUTPUT"
+
+      - name: Verify image loaded
+        run: sudo podman images
+
+      - name: Validate with bootc container lint
+        run: just lint
+        continue-on-error: true
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buildstream-logs-aarch64
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' || inputs.push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            sudo podman login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Tag image for GHCR
+        if: github.event_name == 'push' || inputs.push
+        run: |
+          sudo podman tag "localhost/${{ env.IMAGE_NAME }}:latest" \
+            "${{ env.REGISTRY_LC }}/${{ env.IMAGE_NAME }}:aarch64"
+          sudo podman tag "localhost/${{ env.IMAGE_NAME }}:latest" \
+            "${{ env.REGISTRY_LC }}/${{ env.IMAGE_NAME }}:aarch64-${{ github.sha }}"
+
+      - name: Push to GHCR
+        id: push-aarch64
+        if: github.event_name == 'push' || inputs.push
+        run: |
+          for tag in aarch64 "aarch64-${{ github.sha }}"; do
+            for i in 1 2 3; do
+              sudo podman push --compression-format=zstd \
+                "${{ env.REGISTRY_LC }}/${{ env.IMAGE_NAME }}:${tag}" && break
+              echo "Push attempt $i failed for tag ${tag}, retrying..."
+              sleep 5
+            done
+          done
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
