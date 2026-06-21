@@ -1,0 +1,116 @@
+# .github/workflows/verify-install-aarch64.yml
+# Phase B proof: verifies 'bootc install to-disk' works on aarch64 by running
+# dakota's own documented generate-bootable-image path against the fork's
+# ghcr.io/<owner>/dakota:aarch64 image on a native arm runner. Produces a real
+# bootable composefs disk image (uploaded as a qcow2 artifact) so it can also be
+# booted directly in UTM without an installer. Fork-local; does not touch any
+# publish/promotion pipeline.
+
+name: Verify aarch64 install-to-disk
+
+on:
+  push:
+    branches:
+      - feat/arm64-verify-install
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-install:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup runner (podman + btrfs storage)
+        uses: projectbluefin/actions/bootc-build/setup-runner@v1
+        with:
+          storage-backend: btrfs
+          update-podman: true
+          install-tools: '["just"]'
+
+      - name: Install verification deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gdisk parted qemu-utils util-linux
+
+      - name: Compute lowercase registry owner
+        id: reg
+        run: |
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull aarch64 image and tag as dakota:aarch64
+        env:
+          SRC: ghcr.io/${{ steps.reg.outputs.owner }}/dakota:aarch64
+        run: |
+          set -euxo pipefail
+          sudo podman pull "${SRC}"
+          sudo podman tag "${SRC}" dakota:aarch64
+          sudo podman images
+
+      # Documented dakota path: bootc install to-disk (composefs) via loopback.
+      - name: Install to disk (bootc, composefs)
+        env:
+          BUILD_IMAGE_TAG: aarch64
+          BUILD_FILESYSTEM: btrfs
+        run: |
+          set -euxo pipefail
+          export BUILD_BASE_DIR="${PWD}"
+          just generate-bootable-image default
+          ls -lh bootable.raw
+
+      - name: Verify resulting disk is a valid bootc/composefs install
+        run: |
+          set -euxo pipefail
+          echo "=== GPT partition table ==="
+          sudo sgdisk -p bootable.raw
+          # Expect at least an ESP and a root partition.
+          PARTS=$(sudo sgdisk -p bootable.raw | grep -cE '^[[:space:]]*[0-9]+')
+          echo "partition count: ${PARTS}"
+          test "${PARTS}" -ge 2
+          echo "=== filesystems / labels (via loop) ==="
+          LOOP=$(sudo losetup --show -fP bootable.raw)
+          sudo partprobe "${LOOP}" || true
+          sudo blkid "${LOOP}"* || true
+          # ESP must exist (vfat) and a btrfs root must exist.
+          sudo blkid "${LOOP}"* | grep -qi 'TYPE="vfat"'
+          sudo blkid "${LOOP}"* | grep -qi 'TYPE="btrfs"'
+          # composefs/bootc marker: EFI/systemd boot entries present on ESP.
+          MNT=$(mktemp -d)
+          ESP=$(sudo blkid -o device "${LOOP}"* | while read d; do sudo blkid "$d" | grep -qi 'TYPE="vfat"' && echo "$d" && break; done)
+          sudo mount "${ESP}" "${MNT}"
+          echo "=== ESP contents ==="
+          sudo find "${MNT}" -maxdepth 3 -iname '*.efi' -o -maxdepth 3 -iname 'loader.conf' | head
+          sudo test -d "${MNT}/loader" || sudo test -d "${MNT}/EFI"
+          sudo umount "${MNT}"
+          sudo losetup -d "${LOOP}"
+          echo "INSTALL-VERIFY: OK"
+
+      - name: Convert to sparse qcow2 for upload
+        run: |
+          set -euxo pipefail
+          sudo qemu-img convert -f raw -O qcow2 -c bootable.raw dakota-aarch64-installed.qcow2 || \
+            sudo qemu-img convert -f raw -O qcow2 bootable.raw dakota-aarch64-installed.qcow2
+          sudo chown "$USER:$(id -gn)" dakota-aarch64-installed.qcow2
+          ls -lh dakota-aarch64-installed.qcow2
+
+      - name: Upload installed disk image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dakota-aarch64-installed-qcow2
+          path: dakota-aarch64-installed.qcow2
+          retention-days: 7
+          if-no-files-found: error
